@@ -22,7 +22,9 @@ func NewServer() *Server {
 }
 
 func (s *Server) Get(ctx context.Context, req *pb.GetRequest) (*pb.GetResponse, error) {
-	validateKey(req.Key)
+	if err := validateKey(req.Key); err != nil {
+		return nil, err
+	}
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -35,7 +37,9 @@ func (s *Server) Get(ctx context.Context, req *pb.GetRequest) (*pb.GetResponse, 
 }
 
 func (s *Server) Set(ctx context.Context, req *pb.SetRequest) (*pb.SetResponse, error) {
-	validateKey(req.Key)
+	if err := validateKey(req.Key); err != nil {
+		return nil, err
+	}
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
