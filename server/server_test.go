@@ -1,7 +1,9 @@
 package server
 
 import (
+	"bytes"
 	"context"
+	"strings"
 	"testing"
 
 	pb "github.com/danchia/ddb/proto"
@@ -49,31 +51,53 @@ func TestGetNotFound(t *testing.T) {
 func TestInvalidKeyGet(t *testing.T) {
 	s := NewServer()
 
-	r, err := s.Get(context.Background(), &pb.GetRequest{Key: ""})
-	if r != nil || err == nil {
-		t.Errorf("Get with empty key, got %v, %v want nil, NotFound", r, err)
+	var tests = []struct {
+		key  string
+		want codes.Code
+	}{
+		{"", codes.InvalidArgument},
+		{strings.Repeat("a", int(MaxKeySize+1)), codes.InvalidArgument},
 	}
-	status, ok := status.FromError(err)
-	if !ok {
-		t.Errorf("Unexpected err, got %v want NotFound", err)
-	}
-	if status.Code() != codes.InvalidArgument {
-		t.Errorf("Get with empty key, got status %v want InvalidArgument", status)
+
+	for _, tt := range tests {
+		r, err := s.Get(context.Background(), &pb.GetRequest{Key: tt.key})
+		if r != nil || err == nil {
+			t.Errorf("Get with invalid key %v, got %v, %v want nil, %v", tt.key, r, err, tt.want)
+		}
+		status, ok := status.FromError(err)
+		if !ok {
+			t.Errorf("Unexpected err, got %v want %v", err, tt.want)
+		}
+		if status.Code() != tt.want {
+			t.Errorf("Get with invalid key %v, got status %v want %v", tt.key, status, tt.want)
+		}
 	}
 }
 
-func TestInvalidKeySet(t *testing.T) {
+func TestInvalidSet(t *testing.T) {
 	s := NewServer()
 
-	r, err := s.Set(context.Background(), &pb.SetRequest{Key: ""})
-	if r != nil || err == nil {
-		t.Errorf("Set with empty key, got %v, %v want nil, InvalidArgument", r, err)
+	var tests = []struct {
+		key   string
+		value []byte
+		want  codes.Code
+	}{
+		{"", []byte{}, codes.InvalidArgument},
+		{"a", bytes.Repeat([]byte{1}, int(MaxValueSize+1)), codes.InvalidArgument},
 	}
-	status, ok := status.FromError(err)
-	if !ok {
-		t.Errorf("Unexpected err, got %v want NotFound", err)
-	}
-	if status.Code() != codes.InvalidArgument {
-		t.Errorf("Set with empty key, got status %v want InvalidArgument", status)
+
+	for _, tt := range tests {
+		r := &pb.SetRequest{Key: tt.key, Value: tt.value}
+		rs, err := s.Set(context.Background(), r)
+		if rs != nil || err == nil {
+			t.Errorf("Set with invalid req %v, got %v, %v want nil, %v", r, rs, err, tt.want)
+		}
+		status, ok := status.FromError(err)
+		if !ok {
+			t.Errorf("Unexpected err, got %v want %v", err, tt.want)
+		}
+		if status.Code() != tt.want {
+			t.Errorf("Set with invalid req %v, got status %v want %v", r, status, tt.want)
+		}
 	}
 }

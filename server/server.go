@@ -9,6 +9,11 @@ import (
 	"google.golang.org/grpc/status"
 )
 
+const (
+	MaxKeySize   uint32 = 4 * 1024
+	MaxValueSize uint32 = 512 * 1024
+)
+
 type Server struct {
 	mu   sync.Mutex
 	data map[string][]byte
@@ -40,6 +45,9 @@ func (s *Server) Set(ctx context.Context, req *pb.SetRequest) (*pb.SetResponse, 
 	if err := validateKey(req.Key); err != nil {
 		return nil, err
 	}
+	if err := validateValue(req.Value); err != nil {
+		return nil, err
+	}
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -50,7 +58,17 @@ func (s *Server) Set(ctx context.Context, req *pb.SetRequest) (*pb.SetResponse, 
 
 func validateKey(k string) error {
 	if k == "" {
-		return status.Errorf(codes.InvalidArgument, "Key cannot be empty.")
+		return status.Error(codes.InvalidArgument, "Key cannot be empty.")
+	}
+	if uint32(len(k)) > MaxKeySize {
+		return status.Errorf(codes.InvalidArgument, "Key must be <= %d bytes", MaxKeySize)
+	}
+	return nil
+}
+
+func validateValue(v []byte) error {
+	if uint32(len(v)) > MaxValueSize {
+		return status.Errorf(codes.InvalidArgument, "Value must be <= %d bytes.", MaxValueSize)
 	}
 	return nil
 }
