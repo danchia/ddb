@@ -1,1 +1,1 @@
-protoc proto/ddb.proto --go_out=plugins=grpc:.
+protoc proto/*.proto --go_out=plugins=grpc:.

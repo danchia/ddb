@@ -1,0 +1,24 @@
+syntax = "proto3";
+
+package ddb.internal;
+
+message LogRecord {
+  Mutation mutation = 2;
+}
+
+message Mutation {
+  enum Type {
+    UNSPECIFIED = 0;
+    PUT = 1;
+    DELETE = 2;
+  }
+
+  // The key associated with this mutation.
+  string key = 1;
+
+  // The type of this mutation.
+  Type type = 2;
+
+  // For mutations that update, this is the value.
+  bytes value = 3;
+}

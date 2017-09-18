@@ -6,12 +6,15 @@ Package ddb is a generated protocol buffer package.
 
 It is generated from these files:
 	proto/ddb.proto
+	proto/internal.proto
 
 It has these top-level messages:
 	GetRequest
 	GetResponse
 	SetRequest
 	SetResponse
+	LogRecord
+	Mutation
 */
 package ddb
 

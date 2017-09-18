@@ -5,6 +5,8 @@ import (
 	"sync"
 
 	pb "github.com/danchia/ddb/proto"
+	"github.com/danchia/ddb/wal"
+	"github.com/golang/glog"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
@@ -15,15 +17,64 @@ const (
 )
 
 type Server struct {
-	mu   sync.Mutex
-	data map[string][]byte
+	mu        sync.Mutex
+	data      map[string][]byte
+	logWriter *wal.Writer
 }
 
 func NewServer() *Server {
 	s := Server{}
 	s.data = make(map[string][]byte)
 
+	if err := s.recoverLog(); err != nil {
+		glog.Fatalf("Failed to recover log file: %v", err)
+	}
+
+	logWriter, err := wal.NewWriter("/tmp/ddb.log")
+	if err != nil {
+		glog.Fatalf("Error creating WAL writer: %v", err)
+	}
+	s.logWriter = logWriter
+
 	return &s
+}
+
+func (s *Server) recoverLog() error {
+	sc, err := wal.NewScanner("/tmp/ddb.log")
+	if err != nil {
+		return err
+	}
+
+	n := int64(0)
+
+	for sc.Scan() {
+		r := sc.Record()
+		n++
+
+		if glog.V(4) {
+			glog.V(4).Infof("Read wal record: %v", r)
+		}
+
+		if r.Mutation == nil {
+			glog.Fatalf("Record %d had no mutation: %v", n, r)
+		}
+		s.apply(r.Mutation)
+	}
+
+	glog.Infof("Scanned %d log entries.", n)
+
+	return sc.Err()
+}
+
+func (s *Server) apply(m *pb.Mutation) {
+	switch m.Type {
+	case pb.Mutation_PUT:
+		s.data[m.Key] = m.Value
+	case pb.Mutation_DELETE:
+		delete(s.data, m.Key)
+	default:
+		glog.Fatalf("Mutation with unrecognized type: %v", m)
+	}
 }
 
 func (s *Server) Get(ctx context.Context, req *pb.GetRequest) (*pb.GetResponse, error) {
@@ -38,7 +89,7 @@ func (s *Server) Get(ctx context.Context, req *pb.GetRequest) (*pb.GetResponse, 
 	if !ok {
 		return nil, status.Errorf(codes.NotFound, "Could not find key %q.", req.Key)
 	}
-	return &pb.GetResponse{req.Key, value}, nil
+	return &pb.GetResponse{Key: req.Key, Value: value}, nil
 }
 
 func (s *Server) Set(ctx context.Context, req *pb.SetRequest) (*pb.SetResponse, error) {
@@ -52,7 +103,23 @@ func (s *Server) Set(ctx context.Context, req *pb.SetRequest) (*pb.SetResponse, 
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	s.data[req.Key] = req.Value
+	l := &pb.LogRecord{
+		Mutation: &pb.Mutation{
+			Key:   req.Key,
+			Value: req.Value,
+			Type:  pb.Mutation_PUT,
+		},
+	}
+
+	if err := s.logWriter.Append(l); err != nil {
+		return nil, err
+	}
+	if err := s.logWriter.Sync(); err != nil {
+		return nil, err
+	}
+
+	s.apply(l.Mutation)
+
 	return &pb.SetResponse{}, nil
 }
 
