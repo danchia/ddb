@@ -36,7 +36,7 @@ func benchmark(b *testing.B, dataSize, batchSize int) {
 			Type:  pb.Mutation_PUT,
 		},
 	}
-	lSize := int64(proto.Size(l))
+	b.SetBytes(int64(proto.Size(l)))
 
 	w, err := NewWriter(fname)
 	if err != nil {
@@ -48,7 +48,6 @@ func benchmark(b *testing.B, dataSize, batchSize int) {
 
 	for i := 0; i < b.N; i++ {
 		w.Append(l)
-		b.SetBytes(lSize)
 		if batchSize > 0 && i%batchSize == 0 {
 			w.Sync()
 		}

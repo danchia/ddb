@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"hash/crc32"
 	"os"
+	"sync"
 
 	pb "github.com/danchia/ddb/proto"
 	"github.com/golang/protobuf/proto"
@@ -14,8 +15,12 @@ const (
 	MaxRecordBytes uint32 = 100 * 1024 * 1024
 )
 
+// Writer writes log entries to the write ahead log.
+// Thread-safe.
 type Writer struct {
-	f *os.File
+	f   *os.File
+	mu  sync.Mutex
+	buf *proto.Buffer
 }
 
 func NewWriter(name string) (*Writer, error) {
@@ -24,17 +29,22 @@ func NewWriter(name string) (*Writer, error) {
 		return nil, err
 	}
 
-	wal := &Writer{f}
+	wal := &Writer{f: f, buf: proto.NewBuffer(nil)}
 
 	return wal, nil
 }
 
 func (w *Writer) Append(l *pb.LogRecord) error {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
 	//TODO: Use a proto.Buffer here instead.
-	data, err := proto.Marshal(l)
+	w.buf.Reset()
+	err := w.buf.Marshal(l)
 	if err != nil {
 		return err
 	}
+	data := w.buf.Bytes()
 	dataLen := len(data)
 	if uint32(dataLen) > MaxRecordBytes {
 		return fmt.Errorf("log record has encoded size %d that exceeds %d", dataLen, MaxRecordBytes)
@@ -60,9 +70,15 @@ func (w *Writer) Append(l *pb.LogRecord) error {
 }
 
 func (w *Writer) Sync() error {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
 	return w.f.Sync()
 }
 
 func (w *Writer) Close() error {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
 	return w.f.Close()
 }

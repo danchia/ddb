@@ -11,6 +11,8 @@ import (
 	"github.com/golang/protobuf/proto"
 )
 
+// Scanner reads log records from a write ahead log.
+// Not thread-safe.
 type Scanner struct {
 	f   *os.File
 	err error
