@@ -3,6 +3,7 @@ package wal
 import (
 	"encoding/binary"
 	"fmt"
+	"hash"
 	"hash/crc32"
 	"io"
 	"os"
@@ -17,6 +18,7 @@ type Scanner struct {
 	f   *os.File
 	err error
 	l   *pb.LogRecord
+	h   hash.Hash32
 }
 
 func NewScanner(name string) (*Scanner, error) {
@@ -24,7 +26,12 @@ func NewScanner(name string) (*Scanner, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Scanner{f: f, l: &pb.LogRecord{}}, nil
+	s := &Scanner{
+		f: f,
+		l: &pb.LogRecord{},
+		h: crc32.New(crcTable),
+	}
+	return s, nil
 }
 
 // Scan advances the Scanner to the next log record, which will then be
@@ -50,7 +57,11 @@ func (s *Scanner) Scan() bool {
 	if _, s.err = io.ReadFull(s.f, data); s.err != nil {
 		return false
 	}
-	c := crc32.ChecksumIEEE(data)
+	s.h.Reset()
+	if _, s.err = s.h.Write(data); s.err != nil {
+		return false
+	}
+	c := s.h.Sum32()
 	if c != crc {
 		s.err = fmt.Errorf("Checksum mismatch. Expected %d, got %d.", crc, c)
 		return false
