@@ -88,17 +88,10 @@ func (m *Memtable) Find(key string) []byte {
 		glog.Fatal("Invalid empty key.")
 	}
 
-	c := m.head
-	cl := maxLevel - 1
-	for cl >= 0 {
-		nextAtLevel := c.next[cl]
-		if nextAtLevel == nil || key < nextAtLevel.key {
-			cl--
-		} else if nextAtLevel.key == key {
-			return nextAtLevel.value
-		} else {
-			c = nextAtLevel
-		}
+	n := m.findGreaterOrEqual(key, nil)
+
+	if n != nil && n.key == key {
+		return n.value
 	}
 	return nil
 }

@@ -153,6 +153,71 @@ func TestPickLevel(t *testing.T) {
 	}
 }
 
+func BenchmarkInsert(b *testing.B) {
+	reference := make(map[string]struct{})
+	m := New()
+
+	// pre-seed data
+	for i := 0; i < 100000; i++ {
+		k := randomString(1, 30)
+		v := randomBytes(5, 50)
+		if _, ok := reference[k]; ok {
+			// key existed, skip this data point.
+			continue
+		}
+		reference[k] = struct{}{}
+		m.Insert(k, v)
+	}
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		b.StopTimer()
+		k := randomString(1, 30)
+		v := randomBytes(5, 50)
+		if _, ok := reference[k]; ok {
+			// key existed, skip this data point.
+			continue
+		}
+		reference[k] = struct{}{}
+		b.StartTimer()
+
+		m.Insert(k, v)
+	}
+
+}
+
+func BenchmarkFind(b *testing.B) {
+	reference := make(map[string]struct{})
+	m := New()
+
+	// pre-seed data
+	for i := 0; i < 100000; i++ {
+		k := randomString(1, 30)
+		v := randomBytes(5, 50)
+		if _, ok := reference[k]; ok {
+			// key existed, skip this data point.
+			continue
+		}
+		reference[k] = struct{}{}
+		m.Insert(k, v)
+	}
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		b.StopTimer()
+		var k string
+		for k, _ = range reference {
+			break
+		}
+		b.StartTimer()
+
+		if m.Find(k) == nil {
+			b.Errorf("Find(%v) was nil, expected not nil.", k)
+		}
+	}
+
+}
+
 func randomString(minLength, maxLength int) string {
 	return string(randomBytes(minLength, maxLength))
 }
