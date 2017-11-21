@@ -156,11 +156,11 @@ func TestPickLevel(t *testing.T) {
 func BenchmarkInsert(b *testing.B) {
 	reference := make(map[string]struct{})
 	m := New()
+	v := randomBytes(5, 50)
 
 	// pre-seed data
 	for i := 0; i < 100000; i++ {
 		k := randomString(1, 30)
-		v := randomBytes(5, 50)
 		if _, ok := reference[k]; ok {
 			// key existed, skip this data point.
 			continue
@@ -169,19 +169,19 @@ func BenchmarkInsert(b *testing.B) {
 		m.Insert(k, v)
 	}
 
+	b.StopTimer()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		b.StopTimer()
 		k := randomString(1, 30)
-		v := randomBytes(5, 50)
 		if _, ok := reference[k]; ok {
 			// key existed, skip this data point.
 			continue
 		}
 		reference[k] = struct{}{}
-		b.StartTimer()
 
+		b.StartTimer()
 		m.Insert(k, v)
+		b.StopTimer()
 	}
 
 }
@@ -189,11 +189,11 @@ func BenchmarkInsert(b *testing.B) {
 func BenchmarkFind(b *testing.B) {
 	reference := make(map[string]struct{})
 	m := New()
+	v := randomBytes(5, 50)
 
 	// pre-seed data
 	for i := 0; i < 100000; i++ {
 		k := randomString(1, 30)
-		v := randomBytes(5, 50)
 		if _, ok := reference[k]; ok {
 			// key existed, skip this data point.
 			continue

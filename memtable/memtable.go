@@ -3,6 +3,8 @@ package memtable
 import (
 	"math/bits"
 	"math/rand"
+	"sync/atomic"
+	"unsafe"
 
 	"github.com/golang/glog"
 )
@@ -19,14 +21,22 @@ type Memtable struct {
 type node struct {
 	key   string
 	value []byte
-	next  []*node
+	next  []unsafe.Pointer // actual type is *node
+}
+
+func (n *node) atomicStoreNext(l int, x *node) {
+	atomic.StorePointer(&n.next[l], unsafe.Pointer(x))
+}
+
+func (n *node) atomicLoadNext(l int) *node {
+	return (*node)(atomic.LoadPointer(&n.next[l]))
 }
 
 func New() *Memtable {
 	h := &node{
 		key:   "",
 		value: nil,
-		next:  make([]*node, maxLevel),
+		next:  make([]unsafe.Pointer, maxLevel),
 	}
 	return &Memtable{
 		head: h,
@@ -52,12 +62,12 @@ func (m *Memtable) Insert(key string, value []byte) {
 	newNode := &node{
 		key:   key,
 		value: value,
-		next:  make([]*node, level+1),
+		next:  make([]unsafe.Pointer, level+1),
 	}
 
 	for i := 0; i <= level; i++ {
-		newNode.next[i] = prev[i].next[i]
-		prev[i].next[i] = newNode
+		newNode.atomicStoreNext(i, prev[i].atomicLoadNext(i))
+		prev[i].atomicStoreNext(i, newNode)
 	}
 }
 
@@ -65,21 +75,21 @@ func (m *Memtable) Insert(key string, value []byte) {
 // If prev is not nil, filled with the last node visited per level.
 func (m *Memtable) findGreaterOrEqual(key string, prev []*node) *node {
 	c := m.head
-	cl := maxLevel - 1
-	for {
-		nextAtLevel := c.next[cl]
-		if nextAtLevel != nil && nextAtLevel.key < key {
+	var nextAtLevel *node
+
+	for cl := maxLevel - 1; cl >= 0; cl-- {
+		nextAtLevel = c.atomicLoadNext(cl)
+		for nextAtLevel != nil && nextAtLevel.key < key {
 			c = nextAtLevel
-		} else {
-			if prev != nil {
-				prev[cl] = c
-			}
-			if cl == 0 {
-				return nextAtLevel
-			}
-			cl--
+			nextAtLevel = c.atomicLoadNext(cl)
+		}
+
+		if prev != nil {
+			prev[cl] = c
 		}
 	}
+
+	return nextAtLevel
 }
 
 // Find returns value of key, or nil if not found.
@@ -113,7 +123,7 @@ func (m *Memtable) NewIterator() *Iterator {
 
 // Next advances the iterator. Returns true if there is a next value.
 func (i *Iterator) Next() bool {
-	i.n = i.n.next[0]
+	i.n = i.n.atomicLoadNext(0)
 	return i.n != nil
 }
 
