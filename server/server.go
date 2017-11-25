@@ -3,6 +3,9 @@ package server
 import (
 	"context"
 	"sync"
+	"time"
+
+	"github.com/danchia/ddb/memtable"
 
 	pb "github.com/danchia/ddb/proto"
 	"github.com/danchia/ddb/wal"
@@ -18,13 +21,13 @@ const (
 
 type Server struct {
 	mu        sync.Mutex
-	data      map[string][]byte
+	data      *memtable.Memtable
 	logWriter *wal.Writer
 }
 
 func NewServer() *Server {
 	s := Server{}
-	s.data = make(map[string][]byte)
+	s.data = memtable.New()
 
 	if err := s.recoverLog(); err != nil {
 		glog.Fatalf("Failed to recover log file: %v", err)
@@ -69,9 +72,9 @@ func (s *Server) recoverLog() error {
 func (s *Server) apply(m *pb.Mutation) {
 	switch m.Type {
 	case pb.Mutation_PUT:
-		s.data[m.Key] = m.Value
+		s.data.Insert(m.Key, m.Timestamp, m.Value)
 	case pb.Mutation_DELETE:
-		delete(s.data, m.Key)
+		s.data.Insert(m.Key, m.Timestamp, nil)
 	default:
 		glog.Fatalf("Mutation with unrecognized type: %v", m)
 	}
@@ -85,10 +88,11 @@ func (s *Server) Get(ctx context.Context, req *pb.GetRequest) (*pb.GetResponse, 
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	value, ok := s.data[req.Key]
-	if !ok {
+	value := s.data.Find(req.Key)
+	if value == nil {
 		return nil, status.Errorf(codes.NotFound, "Could not find key %q.", req.Key)
 	}
+	// TODO: return timestamp of value
 	return &pb.GetResponse{Key: req.Key, Value: value}, nil
 }
 
@@ -103,11 +107,14 @@ func (s *Server) Set(ctx context.Context, req *pb.SetRequest) (*pb.SetResponse, 
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	ts := time.Now().UnixNano() / 1000
+
 	l := &pb.LogRecord{
 		Mutation: &pb.Mutation{
-			Key:   req.Key,
-			Value: req.Value,
-			Type:  pb.Mutation_PUT,
+			Key:       req.Key,
+			Timestamp: ts,
+			Value:     req.Value,
+			Type:      pb.Mutation_PUT,
 		},
 	}
 
@@ -120,7 +127,7 @@ func (s *Server) Set(ctx context.Context, req *pb.SetRequest) (*pb.SetResponse, 
 
 	s.apply(l.Mutation)
 
-	return &pb.SetResponse{}, nil
+	return &pb.SetResponse{Timestamp: ts}, nil
 }
 
 func validateKey(k string) error {

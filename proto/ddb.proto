@@ -15,7 +15,8 @@ message GetRequest {
 
 message GetResponse {
   string key = 1;
-  bytes value = 2;
+  int64 timestamp = 2;
+  bytes value = 3;
 }
 
 message SetRequest {
@@ -24,4 +25,5 @@ message SetRequest {
 }
 
 message SetResponse {
+  int64 timestamp = 1;
 }

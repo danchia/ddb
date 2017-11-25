@@ -19,6 +19,9 @@ message Mutation {
   // The type of this mutation.
   Type type = 2;
 
+  // Timestamp of this mutation.
+  int64 timestamp = 3;
+
   // For mutations that update, this is the value.
-  bytes value = 3;
+  bytes value = 4;
 }

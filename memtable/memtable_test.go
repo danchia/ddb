@@ -9,8 +9,9 @@ import (
 )
 
 type kv struct {
-	Key   string
-	Value []byte
+	Key       string
+	Timestamp int64
+	Value     []byte
 }
 
 func TestFind(t *testing.T) {
@@ -21,24 +22,27 @@ func TestFind(t *testing.T) {
 		want    []byte
 	}{
 		{"0 entry, not found", []kv{}, "abcd", nil},
-		{"1 entry, found", []kv{kv{"abc", []byte("123")}}, "abc", []byte("123")},
-		{"1 entry, not found after", []kv{kv{"abc", []byte("123")}}, "ab", nil},
-		{"1 entry, not found before", []kv{kv{"abc", []byte("123")}}, "abcd", nil},
+		{"1 entry, found", []kv{kv{"abc", 1, []byte("123")}}, "abc", []byte("123")},
+		{"1 entry, not found after", []kv{kv{"abc", 1, []byte("123")}}, "ab", nil},
+		{"1 entry, not found before", []kv{kv{"abc", 1, []byte("123")}}, "abcd", nil},
 		{"3 entry, find first",
-			[]kv{kv{"a", []byte("1")}, kv{"b", []byte("2")}, kv{"c", []byte("3")}},
+			[]kv{kv{"a", 1, []byte("1")}, kv{"b", 2, []byte("2")}, kv{"c", 3, []byte("3")}},
 			"a", []byte("1")},
 		{"3 entry, find second",
-			[]kv{kv{"a", []byte("1")}, kv{"b", []byte("2")}, kv{"c", []byte("3")}},
+			[]kv{kv{"a", 3, []byte("1")}, kv{"b", 2, []byte("2")}, kv{"c", 1, []byte("3")}},
 			"b", []byte("2")},
 		{"3 entry reversed, find second",
-			[]kv{kv{"c", []byte("1")}, kv{"b", []byte("2")}, kv{"a", []byte("3")}},
+			[]kv{kv{"c", 1, []byte("1")}, kv{"b", 2, []byte("2")}, kv{"a", 3, []byte("3")}},
 			"b", []byte("2")},
+		{"3 entry same key, find first",
+			[]kv{kv{"a", 1, []byte("1")}, kv{"a", 20, []byte("2")}, kv{"a", 3, []byte("3")}},
+			"a", []byte("2")},
 	}
 	for _, tt := range tests {
 		m := New()
 		t.Run(tt.name, func(t *testing.T) {
 			for _, kv := range tt.insert {
-				m.Insert(kv.Key, kv.Value)
+				m.Insert(kv.Key, kv.Timestamp, kv.Value)
 			}
 
 			if got := m.Find(tt.findKey); !cmp.Equal(got, tt.want) {
@@ -56,29 +60,29 @@ func TestIterator(t *testing.T) {
 	}{
 		{"0 entries", []kv{}, []kv{}},
 		{"1 entry",
-			[]kv{kv{"abc", []byte("123")}},
-			[]kv{kv{"abc", []byte("123")}}},
+			[]kv{kv{"abc", 321, []byte("123")}},
+			[]kv{kv{"abc", 321, []byte("123")}}},
 		{"3 entries sorted",
-			[]kv{kv{"a", []byte("1")}, kv{"b", []byte("2")}, kv{"c", []byte("3")}},
-			[]kv{kv{"a", []byte("1")}, kv{"b", []byte("2")}, kv{"c", []byte("3")}}},
-		{"3 entries reversed",
-			[]kv{kv{"c", []byte("1")}, kv{"b", []byte("2")}, kv{"a", []byte("3")}},
-			[]kv{kv{"a", []byte("3")}, kv{"b", []byte("2")}, kv{"c", []byte("1")}}},
+			[]kv{kv{"a", 97, []byte("1")}, kv{"b", 13, []byte("2")}, kv{"c", 33, []byte("3")}},
+			[]kv{kv{"a", 97, []byte("1")}, kv{"b", 13, []byte("2")}, kv{"c", 33, []byte("3")}}},
+		{"3 entries,reversed",
+			[]kv{kv{"b", 1, []byte("1")}, kv{"b", 5, []byte("2")}, kv{"a", 300, []byte("3")}},
+			[]kv{kv{"a", 300, []byte("3")}, kv{"b", 5, []byte("2")}, kv{"b", 1, []byte("1")}}},
 		{"3 entries random",
-			[]kv{kv{"a", []byte("1")}, kv{"c", []byte("2")}, kv{"b", []byte("3")}},
-			[]kv{kv{"a", []byte("1")}, kv{"b", []byte("3")}, kv{"c", []byte("2")}}},
+			[]kv{kv{"a", 3, []byte("1")}, kv{"c", 100, []byte("2")}, kv{"b", 25, []byte("3")}},
+			[]kv{kv{"a", 3, []byte("1")}, kv{"b", 25, []byte("3")}, kv{"c", 100, []byte("2")}}},
 	}
 	for _, tt := range tests {
 		m := New()
 		t.Run(tt.name, func(t *testing.T) {
 			for _, kv := range tt.insert {
-				m.Insert(kv.Key, kv.Value)
+				m.Insert(kv.Key, kv.Timestamp, kv.Value)
 			}
 			got := make([]kv, 0)
 
 			i := m.NewIterator()
 			for i.Next() {
-				got = append(got, kv{i.Key(), i.Value()})
+				got = append(got, kv{i.Key(), i.Timestamp(), i.Value()})
 			}
 			i.Close()
 
@@ -91,30 +95,32 @@ func TestIterator(t *testing.T) {
 }
 
 func TestRandomData(t *testing.T) {
-	reference := make(map[string][]byte)
+	type tv struct {
+		timestamp int64
+		value     []byte
+	}
+
+	reference := make(map[string]tv)
 	m := New()
 
 	for i := 0; i < 100000; i++ {
 		k := randomString(1, 30)
 		v := randomBytes(5, 50)
-		if _, ok := reference[k]; ok {
-			// key existed, skip this data point.
-			continue
-		}
-		reference[k] = v
-		m.Insert(k, v)
+		ts := int64(i)
+		reference[k] = tv{ts, v}
+		m.Insert(k, ts, v)
 	}
 
 	// perform some random probes of keys that exist
 	for i := 0; i < 50000; i++ {
 		var rk string
-		var want []byte
+		var want tv
 		for rk, want = range reference {
 			break
 		}
-		if got := m.Find(rk); !cmp.Equal(got, want) {
+		if got := m.Find(rk); !cmp.Equal(got, want.value) {
 			t.Errorf("Find(%v) = %v, want %v",
-				hex.EncodeToString([]byte(rk)), hex.EncodeToString(got), hex.EncodeToString(want))
+				hex.EncodeToString([]byte(rk)), hex.EncodeToString(got), hex.EncodeToString(want.value))
 		}
 	}
 
@@ -166,7 +172,7 @@ func BenchmarkInsert(b *testing.B) {
 			continue
 		}
 		reference[k] = struct{}{}
-		m.Insert(k, v)
+		m.Insert(k, int64(i), v)
 	}
 
 	b.StopTimer()
@@ -180,7 +186,7 @@ func BenchmarkInsert(b *testing.B) {
 		reference[k] = struct{}{}
 
 		b.StartTimer()
-		m.Insert(k, v)
+		m.Insert(k, int64(i), v)
 		b.StopTimer()
 	}
 
@@ -199,7 +205,7 @@ func BenchmarkFind(b *testing.B) {
 			continue
 		}
 		reference[k] = struct{}{}
-		m.Insert(k, v)
+		m.Insert(k, int64(i), v)
 	}
 
 	b.ResetTimer()
