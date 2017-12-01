@@ -53,17 +53,18 @@ func (r *SSTReader) Find(key string) ([]byte, error) {
 		}
 		offset += n
 
-		kb = kb[0 : keyLen+1]
+		kb = kb[0:keyLen]
 		if _, err := r.f.ReadAt(kb, offset); err != nil {
 			return nil, err
 		}
 		offset += int64(keyLen)
 
 		readKey := string(kb)
+		glog.Infof("Key is %v", readKey)
 
 		if readKey == key {
 			value := make([]byte, valueLen)
-			if _, err := r.f.ReadAt(value, offset+int64(keyLen)); err != nil {
+			if _, err := r.f.ReadAt(value, offset); err != nil {
 				return nil, err
 			}
 			return value, nil

@@ -52,10 +52,6 @@ func (s *SSTWriter) Append(key string, value []byte) error {
 
 // Close finalizes the SST being written.
 func (s *SSTWriter) Close() error {
-	if err := writeUint64(s.w, SstMagic); err != nil {
-		return err
-	}
-
 	if err := s.w.Flush(); err != nil {
 		return err
 	}

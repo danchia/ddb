@@ -115,8 +115,8 @@ func TestFind(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			if got, err := r.Find(tt.findKey); err != nil && !cmp.Equal(got, tt.want) {
-				t.Errorf("Find(%s)=%s, error=%s want %s", tt.findKey, got, err, tt.want)
+			if got, err := r.Find(tt.findKey); err != nil || !cmp.Equal(got, tt.want) {
+				t.Errorf("Find(%v)=%v, error=%v want %v", tt.findKey, got, err, tt.want)
 			}
 		})
 	}
