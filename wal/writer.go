@@ -29,9 +29,10 @@ type Writer struct {
 	mu        sync.Mutex
 	buf       *proto.Buffer
 	crc       hash.Hash32
+	nextSeq   int64
 }
 
-func NewWriter(name string) (*Writer, error) {
+func NewWriter(name string, nextSeq int64) (*Writer, error) {
 	f, err := os.Create(name)
 	if err != nil {
 		return nil, err
@@ -42,14 +43,19 @@ func NewWriter(name string) (*Writer, error) {
 		bufWriter: bufio.NewWriter(f),
 		buf:       proto.NewBuffer(nil),
 		crc:       crc32.New(crcTable),
+		nextSeq:   nextSeq,
 	}
 
 	return wal, nil
 }
 
+// Append appends a log record to the WAL. The log record is modified with the log sequence number.
 func (w *Writer) Append(l *pb.LogRecord) error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
+
+	l.Sequence = w.nextSeq
+	w.nextSeq++
 
 	w.buf.Reset()
 	err := w.buf.Marshal(l)

@@ -3,6 +3,7 @@ syntax = "proto3";
 package ddb.internal;
 
 message LogRecord {
+  int64 sequence = 1;
   Mutation mutation = 2;
 }
 

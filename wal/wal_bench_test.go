@@ -38,7 +38,7 @@ func benchmark(b *testing.B, dataSize, batchSize int) {
 	}
 	b.SetBytes(int64(proto.Size(l)))
 
-	w, err := NewWriter(fname)
+	w, err := NewWriter(fname, 0)
 	if err != nil {
 		b.Fatal(err)
 	}

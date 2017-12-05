@@ -18,7 +18,7 @@ func TestReadWrite(t *testing.T) {
 	defer os.RemoveAll(dir)
 	fname := filepath.Join(dir, "1.log")
 
-	w, err := NewWriter(fname)
+	w, err := NewWriter(fname, 1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -26,9 +26,12 @@ func TestReadWrite(t *testing.T) {
 		&pb.LogRecord{Mutation: &pb.Mutation{Key: "a"}},
 		&pb.LogRecord{Mutation: &pb.Mutation{Key: "b"}},
 	}
-	for _, r := range expectedRecords {
+	for i, r := range expectedRecords {
 		if err = w.Append(r); err != nil {
 			t.Fatal(err)
+		}
+		if r.Sequence != int64(i+1) {
+			t.Errorf("r.Sequence = %v, want %v", r.Sequence, i+1)
 		}
 	}
 	if err = w.Sync(); err != nil {
