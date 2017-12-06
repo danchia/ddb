@@ -5,11 +5,13 @@ import (
 	"os"
 
 	"github.com/golang/glog"
+	"github.com/google/orderedcode"
 )
 
 type SSTWriter struct {
-	f *os.File
-	w *bufio.Writer
+	f      *os.File
+	w      *bufio.Writer
+	tmpKey []byte
 }
 
 func NewSSTWriter(filename string) (*SSTWriter, error) {
@@ -29,18 +31,23 @@ func NewSSTWriter(filename string) (*SSTWriter, error) {
 }
 
 // Append writes a new row to the SSTable.
-// Must be called in strictly increasing key order.
-func (s *SSTWriter) Append(key string, value []byte) error {
+// Must be called in order, i.e. key asc, timestamp desc
+func (s *SSTWriter) Append(key string, timestamp int64, value []byte) error {
 	if len(key) > MaxKeySize {
 		glog.Fatalf("Tried to Append key larger than max keysize. key: %s", key)
 	}
-	if err := writeUvarInt64(s.w, uint64(len(key))); err != nil {
+	tmpKey, err := orderedcode.Append(s.tmpKey[:0], key, orderedcode.Decr(timestamp))
+	s.tmpKey = tmpKey
+	if err != nil {
+		return err
+	}
+	if err := writeUvarInt64(s.w, uint64(len(tmpKey))); err != nil {
 		return err
 	}
 	if err := writeUvarInt64(s.w, uint64(len(value))); err != nil {
 		return err
 	}
-	if _, err := s.w.WriteString(key); err != nil {
+	if _, err := s.w.Write(tmpKey); err != nil {
 		return err
 	}
 	if _, err := s.w.Write(value); err != nil {

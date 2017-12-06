@@ -10,8 +10,9 @@ import (
 )
 
 type kv struct {
-	Key   string
-	Value []byte
+	Key       string
+	Timestamp int64
+	Value     []byte
 }
 
 func TestFind(t *testing.T) {
@@ -29,24 +30,24 @@ func TestFind(t *testing.T) {
 		},
 		{
 			"One entry SST, found.",
-			[]kv{kv{"a", []byte("1")}},
+			[]kv{kv{"a", 1, []byte("1")}},
 			"a",
 			[]byte("1"),
 		},
 		{
 			"One entry SST, not found.",
-			[]kv{kv{"a", []byte("1")}},
+			[]kv{kv{"a", 1, []byte("1")}},
 			"ab",
 			nil,
 		},
 		{
 			"Five entry SST, found start.",
 			[]kv{
-				kv{"a", []byte("1")},
-				kv{"b", []byte("2")},
-				kv{"c", []byte("3")},
-				kv{"d", []byte("4")},
-				kv{"e", []byte("5")},
+				kv{"a", 1, []byte("1")},
+				kv{"b", 1, []byte("2")},
+				kv{"c", 1, []byte("3")},
+				kv{"d", 1, []byte("4")},
+				kv{"e", 1, []byte("5")},
 			},
 			"a",
 			[]byte("1"),
@@ -54,23 +55,23 @@ func TestFind(t *testing.T) {
 		{
 			"Five entry SST, found.",
 			[]kv{
-				kv{"a", []byte("1")},
-				kv{"b", []byte("2")},
-				kv{"c", []byte("3")},
-				kv{"d", []byte("4")},
-				kv{"e", []byte("5")},
+				kv{"a", 1, []byte("1")},
+				kv{"b", 10, []byte("2")},
+				kv{"b", 1, []byte("3")},
+				kv{"d", 1, []byte("4")},
+				kv{"e", 1, []byte("5")},
 			},
-			"c",
-			[]byte("3"),
+			"b",
+			[]byte("2"),
 		},
 		{
 			"Five entry SST, found end.",
 			[]kv{
-				kv{"a", []byte("1")},
-				kv{"b", []byte("2")},
-				kv{"c", []byte("3")},
-				kv{"d", []byte("4")},
-				kv{"e", []byte("5")},
+				kv{"a", 13, []byte("1")},
+				kv{"b", 13, []byte("2")},
+				kv{"c", 13, []byte("3")},
+				kv{"d", 13, []byte("4")},
+				kv{"e", 13, []byte("5")},
 			},
 			"e",
 			[]byte("5"),
@@ -78,11 +79,11 @@ func TestFind(t *testing.T) {
 		{
 			"Five entry SST, not found.",
 			[]kv{
-				kv{"a", []byte("1")},
-				kv{"b", []byte("2")},
-				kv{"c", []byte("3")},
-				kv{"d", []byte("4")},
-				kv{"e", []byte("5")},
+				kv{"a", 13, []byte("1")},
+				kv{"b", 13, []byte("2")},
+				kv{"c", 13, []byte("3")},
+				kv{"d", 13, []byte("4")},
+				kv{"e", 13, []byte("5")},
 			},
 			"ee",
 			nil,
@@ -102,7 +103,7 @@ func TestFind(t *testing.T) {
 				t.Fatal(err)
 			}
 			for _, entry := range tt.write {
-				if err := w.Append(entry.Key, entry.Value); err != nil {
+				if err := w.Append(entry.Key, entry.Timestamp, entry.Value); err != nil {
 					t.Fatal(err)
 				}
 			}

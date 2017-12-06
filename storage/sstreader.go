@@ -4,6 +4,7 @@ import "os"
 import "fmt"
 import "github.com/golang/glog"
 import "encoding/binary"
+import "github.com/google/orderedcode"
 
 // SSTReader is an SSTable reader.
 // Threadsafe.
@@ -59,8 +60,12 @@ func (r *SSTReader) Find(key string) ([]byte, error) {
 		}
 		offset += int64(keyLen)
 
-		readKey := string(kb)
-		glog.Infof("Key is %v", readKey)
+		eKey := string(kb)
+		var readKey string
+		var ts int64
+		if _, err := orderedcode.Parse(eKey, &readKey, orderedcode.Decr(&ts)); err != nil {
+			return nil, err
+		}
 
 		if readKey == key {
 			value := make([]byte, valueLen)
