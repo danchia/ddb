@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"os"
 	"sync"
 	"time"
 
@@ -27,6 +28,12 @@ type Server struct {
 func NewServer() *Server {
 	s := Server{}
 
+	storageOpts := storageOptions{
+		sstDir:            "/tmp/ddb_sst",
+		memtableFlushSize: 100,
+	}
+	s.storage = newStorage(storageOpts)
+
 	if err := s.recoverLog(); err != nil {
 		glog.Fatalf("Failed to recover log file: %v", err)
 	}
@@ -38,17 +45,15 @@ func NewServer() *Server {
 	}
 	s.logWriter = logWriter
 
-	storageOpts := storageOptions{
-		sstDir:            "/tmp/ddb_sst",
-		memtableFlushSize: 10000,
-	}
-	s.storage = newStorage(storageOpts)
-
 	return &s
 }
 
 func (s *Server) recoverLog() error {
 	sc, err := wal.NewScanner("/tmp/ddb.log")
+	if os.IsNotExist(err) {
+		glog.Infof("no log files found")
+		return nil
+	}
 	if err != nil {
 		return err
 	}

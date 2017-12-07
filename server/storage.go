@@ -2,7 +2,7 @@ package server
 
 import (
 	"fmt"
-	"os"
+	"path"
 	"sync"
 	"time"
 
@@ -64,7 +64,7 @@ func (s *storage) flushMemtable() {
 	s.mu.Unlock()
 
 	ts := time.Now().UnixNano()
-	fn := fmt.Sprintf("%v%v%020d.sst", s.opts.sstDir, os.PathSeparator, ts)
+	fn := path.Join(s.opts.sstDir, fmt.Sprintf("%020d.sst", ts))
 
 	glog.Infof("flushing memtable of size %v to %v", m.SizeBytes(), fn)
 
@@ -81,4 +81,6 @@ func (s *storage) flushMemtable() {
 	if err := writer.Close(); err != nil {
 		glog.Fatalf("error closing SST while flushing memtable: %v", err)
 	}
+
+	glog.Infof("flush completed for %v", fn)
 }
