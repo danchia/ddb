@@ -29,6 +29,12 @@ func TestFind(t *testing.T) {
 			nil,
 		},
 		{
+			"One nil-value entry SST, found.",
+			[]kv{kv{"a", 1, nil}},
+			"a",
+			nil,
+		},
+		{
 			"One entry SST, found.",
 			[]kv{kv{"a", 1, []byte("1")}},
 			"a",

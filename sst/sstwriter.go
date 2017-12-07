@@ -44,14 +44,23 @@ func (s *SSTWriter) Append(key string, timestamp int64, value []byte) error {
 	if err := writeUvarInt64(s.w, uint64(len(tmpKey))); err != nil {
 		return err
 	}
-	if err := writeUvarInt64(s.w, uint64(len(value))); err != nil {
+	if err := writeUvarInt64(s.w, uint64(len(value)+1)); err != nil {
 		return err
 	}
 	if _, err := s.w.Write(tmpKey); err != nil {
 		return err
 	}
-	if _, err := s.w.Write(value); err != nil {
-		return err
+	if value == nil {
+		if err := s.w.WriteByte(typeNil); err != nil {
+			return err
+		}
+	} else {
+		if err := s.w.WriteByte(typeBytes); err != nil {
+			return err
+		}
+		if _, err := s.w.Write(value); err != nil {
+			return err
+		}
 	}
 
 	return nil

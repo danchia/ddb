@@ -72,7 +72,10 @@ func (r *SSTReader) Find(key string) ([]byte, error) {
 			if _, err := r.f.ReadAt(value, offset); err != nil {
 				return nil, err
 			}
-			return value, nil
+			if value[0] == typeNil {
+				return nil, nil
+			}
+			return value[1:], nil
 		}
 		if readKey > key {
 			return nil, nil
