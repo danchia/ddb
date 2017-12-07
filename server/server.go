@@ -5,8 +5,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/danchia/ddb/memtable"
-
 	pb "github.com/danchia/ddb/proto"
 	"github.com/danchia/ddb/wal"
 	"github.com/golang/glog"
@@ -20,24 +18,31 @@ const (
 )
 
 type Server struct {
-	mu        sync.Mutex
-	data      *memtable.Memtable
+	mu sync.Mutex
+
+	storage   *storage
 	logWriter *wal.Writer
 }
 
 func NewServer() *Server {
 	s := Server{}
-	s.data = memtable.New()
 
 	if err := s.recoverLog(); err != nil {
 		glog.Fatalf("Failed to recover log file: %v", err)
 	}
 
-	logWriter, err := wal.NewWriter("/tmp/ddb.log")
+	// FIXME: next seqno should be from recovered log.
+	logWriter, err := wal.NewWriter("/tmp/ddb.log", 1)
 	if err != nil {
 		glog.Fatalf("Error creating WAL writer: %v", err)
 	}
 	s.logWriter = logWriter
+
+	storageOpts := storageOptions{
+		sstDir:            "/tmp/ddb_sst",
+		memtableFlushSize: 10000,
+	}
+	s.storage = newStorage(storageOpts)
 
 	return &s
 }
@@ -61,23 +66,12 @@ func (s *Server) recoverLog() error {
 		if r.Mutation == nil {
 			glog.Fatalf("Record %d had no mutation: %v", n, r)
 		}
-		s.apply(r.Mutation)
+		s.storage.Apply(r.Mutation)
 	}
 
 	glog.Infof("Scanned %d log entries.", n)
 
 	return sc.Err()
-}
-
-func (s *Server) apply(m *pb.Mutation) {
-	switch m.Type {
-	case pb.Mutation_PUT:
-		s.data.Insert(m.Key, m.Timestamp, m.Value)
-	case pb.Mutation_DELETE:
-		s.data.Insert(m.Key, m.Timestamp, nil)
-	default:
-		glog.Fatalf("Mutation with unrecognized type: %v", m)
-	}
 }
 
 func (s *Server) Get(ctx context.Context, req *pb.GetRequest) (*pb.GetResponse, error) {
@@ -88,9 +82,12 @@ func (s *Server) Get(ctx context.Context, req *pb.GetRequest) (*pb.GetResponse, 
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	value := s.data.Find(req.Key)
+	value, err := s.storage.Find(req.Key)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "internal error: %v", err)
+	}
 	if value == nil {
-		return nil, status.Errorf(codes.NotFound, "Could not find key %q.", req.Key)
+		return nil, status.Errorf(codes.NotFound, "Could not find key %v.", req.Key)
 	}
 	// TODO: return timestamp of value
 	return &pb.GetResponse{Key: req.Key, Value: value}, nil
@@ -125,7 +122,7 @@ func (s *Server) Set(ctx context.Context, req *pb.SetRequest) (*pb.SetResponse, 
 		return nil, err
 	}
 
-	s.apply(l.Mutation)
+	s.storage.Apply(l.Mutation)
 
 	return &pb.SetResponse{Timestamp: ts}, nil
 }

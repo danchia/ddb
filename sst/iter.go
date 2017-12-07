@@ -1,4 +1,4 @@
-package storage
+package sst
 
 // Iterator is an iterator over keys and values.
 // Iterators MUST be closed when done.

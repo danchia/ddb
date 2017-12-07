@@ -4,6 +4,7 @@ import (
 	"math"
 	"math/bits"
 	"math/rand"
+	"sync"
 	"sync/atomic"
 	"unsafe"
 
@@ -19,6 +20,9 @@ const (
 type Memtable struct {
 	head *node
 	rnd  *rand.Rand
+
+	size int64
+	mu   sync.Mutex
 }
 
 type node struct {
@@ -51,6 +55,9 @@ func New() *Memtable {
 // Insert inserts (key, timestamp, value) into the memtable.
 // Requires that (key, timestamp) does not already exist.
 func (m *Memtable) Insert(key string, timestamp int64, value []byte) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
 	if key == "" {
 		glog.Fatal("Invalid empty key.")
 	}
@@ -69,11 +76,19 @@ func (m *Memtable) Insert(key string, timestamp int64, value []byte) {
 		value:     value,
 		next:      make([]unsafe.Pointer, level+1),
 	}
+	m.size += int64(len(key)) + int64(len(value)) + 8 + 8*int64(level+1)
 
 	for i := 0; i <= level; i++ {
 		newNode.atomicStoreNext(i, prev[i].atomicLoadNext(i))
 		prev[i].atomicStoreNext(i, newNode)
 	}
+}
+
+// SizeBytes returns the approximate memory used by this memtable.
+func (m *Memtable) SizeBytes() int64 {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.size
 }
 
 // findGreaterOrEqual retuns the first node that is greater than or equal to (key, timestamp).
