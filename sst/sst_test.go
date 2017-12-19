@@ -104,7 +104,7 @@ func TestFind(t *testing.T) {
 			defer os.RemoveAll(dir)
 			fname := filepath.Join(dir, "1.sst")
 
-			w, err := NewSSTWriter(fname)
+			w, err := NewWriter(fname)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -117,7 +117,7 @@ func TestFind(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			r, err := NewSSTReader(fname)
+			r, err := NewReader(fname)
 			if err != nil {
 				t.Fatal(err)
 			}

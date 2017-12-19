@@ -6,15 +6,15 @@ import "github.com/golang/glog"
 import "encoding/binary"
 import "github.com/google/orderedcode"
 
-// SSTReader is an SSTable reader.
+// Reader is an SSTable reader.
 // Threadsafe.
-type SSTReader struct {
+type Reader struct {
 	f        *os.File
 	fLength  int64
 	filename string
 }
 
-func NewSSTReader(filename string) (*SSTReader, error) {
+func NewReader(filename string) (*Reader, error) {
 	f, err := os.Open(filename)
 	if err != nil {
 		return nil, err
@@ -25,7 +25,7 @@ func NewSSTReader(filename string) (*SSTReader, error) {
 		return nil, err
 	}
 
-	r := &SSTReader{
+	r := &Reader{
 		f:        f,
 		fLength:  fInfo.Size(),
 		filename: filename,
@@ -36,7 +36,11 @@ func NewSSTReader(filename string) (*SSTReader, error) {
 	return r, nil
 }
 
-func (r *SSTReader) Find(key string) ([]byte, error) {
+type Iter struct {
+	r *Reader
+}
+
+func (r *Reader) Find(key string) ([]byte, error) {
 	// No index, so have to do the a dumb scan.
 	kb := make([]byte, 0, MaxKeySize)
 	offset := int64(8) // skip magic
@@ -87,7 +91,7 @@ func (r *SSTReader) Find(key string) ([]byte, error) {
 }
 
 // verifyMagic returns true is magic at offset is valid.
-func (r *SSTReader) verifyMagic(offset int64) bool {
+func (r *Reader) verifyMagic(offset int64) bool {
 	var b [8]byte
 	if _, err := r.f.ReadAt(b[:], offset); err != nil {
 		glog.V(2).Infof("File error while verifying magic for %s:%d. %s",

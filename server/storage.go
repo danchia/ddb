@@ -68,7 +68,7 @@ func (s *storage) flushMemtable() {
 
 	glog.Infof("flushing memtable of size %v to %v", m.SizeBytes(), fn)
 
-	writer, err := sst.NewSSTWriter(fn)
+	writer, err := sst.NewWriter(fn)
 	if err != nil {
 		glog.Fatalf("error opening SST while flushing memtable: %v", err)
 	}

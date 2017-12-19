@@ -8,19 +8,19 @@ import (
 	"github.com/google/orderedcode"
 )
 
-type SSTWriter struct {
+type Writer struct {
 	f      *os.File
 	w      *bufio.Writer
 	tmpKey []byte
 }
 
-func NewSSTWriter(filename string) (*SSTWriter, error) {
+func NewWriter(filename string) (*Writer, error) {
 	f, err := os.Create(filename)
 	if err != nil {
 		return nil, err
 	}
 
-	w := &SSTWriter{
+	w := &Writer{
 		f: f,
 		w: bufio.NewWriter(f),
 	}
@@ -32,7 +32,7 @@ func NewSSTWriter(filename string) (*SSTWriter, error) {
 
 // Append writes a new row to the SSTable.
 // Must be called in order, i.e. key asc, timestamp desc
-func (s *SSTWriter) Append(key string, timestamp int64, value []byte) error {
+func (s *Writer) Append(key string, timestamp int64, value []byte) error {
 	if len(key) > MaxKeySize {
 		glog.Fatalf("Tried to Append key larger than max keysize. key: %s", key)
 	}
@@ -67,7 +67,7 @@ func (s *SSTWriter) Append(key string, timestamp int64, value []byte) error {
 }
 
 // Close finalizes the SST being written.
-func (s *SSTWriter) Close() error {
+func (s *Writer) Close() error {
 	if err := s.w.Flush(); err != nil {
 		return err
 	}
