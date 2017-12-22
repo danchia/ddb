@@ -2,6 +2,7 @@ package server
 
 import (
 	"fmt"
+	"math"
 	"path"
 	"sync"
 	"time"
@@ -15,6 +16,8 @@ import (
 type storage struct {
 	memtable  *memtable.Memtable
 	imemtable *memtable.Memtable
+
+	ssts []*sst.Reader
 
 	opts storageOptions
 	mu   sync.Mutex
@@ -52,10 +55,43 @@ func (s *storage) Apply(m *pb.Mutation) {
 
 func (s *storage) Find(key string) ([]byte, error) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 
-	// TODO read from SST
-	return s.memtable.Find(key), nil
+	v, found := s.memtable.Find(key)
+	if found {
+		s.mu.Unlock()
+		return v, nil
+	}
+	if s.imemtable != nil {
+		v, found = s.imemtable.Find(key)
+		if found {
+			s.mu.Unlock()
+			return v, nil
+		}
+	}
+
+	ssts := make([]*sst.Reader, len(s.ssts))
+	copy(ssts, s.ssts)
+	// Don't hold lock while reading from SST.
+	s.mu.Unlock()
+
+	var value []byte
+	valueTs := int64(math.MinInt64)
+
+	for _, s := range ssts {
+		v, ts, err := s.Find(key)
+		if err == sst.ErrNotFound {
+			continue
+		}
+		if err != nil {
+			return nil, err
+		}
+		if ts > valueTs {
+			value = v
+			valueTs = ts
+		}
+	}
+
+	return value, nil
 }
 
 func (s *storage) flushMemtable() {
@@ -86,7 +122,13 @@ func (s *storage) flushMemtable() {
 
 	glog.Infof("flush completed for %v", fn)
 
+	reader, err := sst.NewReader(fn)
+	if err != nil {
+		glog.Fatalf("error opneing SST that was just flushed: %v", err)
+	}
+
 	s.mu.Lock()
 	s.imemtable = nil
+	s.ssts = append(s.ssts, reader)
 	s.mu.Unlock()
 }

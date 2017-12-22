@@ -1,10 +1,18 @@
 package sst
 
-import "os"
-import "fmt"
-import "github.com/golang/glog"
-import "encoding/binary"
-import "github.com/google/orderedcode"
+import (
+	"encoding/binary"
+	"errors"
+	"fmt"
+	"os"
+
+	"github.com/golang/glog"
+	"github.com/google/orderedcode"
+)
+
+var (
+	ErrNotFound = errors.New("not found")
+)
 
 // Reader is an SSTable reader.
 // Threadsafe.
@@ -40,7 +48,7 @@ type Iter struct {
 	r *Reader
 }
 
-func (r *Reader) Find(key string) ([]byte, error) {
+func (r *Reader) Find(key string) (value []byte, ts int64, err error) {
 	// No index, so have to do the a dumb scan.
 	kb := make([]byte, 0, MaxKeySize)
 	offset := int64(8) // skip magic
@@ -48,19 +56,19 @@ func (r *Reader) Find(key string) ([]byte, error) {
 	for offset < r.fLength {
 		keyLen, n, err := readAtUvarInt64(r.f, offset)
 		if err != nil {
-			return nil, err
+			return nil, 0, err
 		}
 		offset += n
 
 		valueLen, n, err := readAtUvarInt64(r.f, offset)
 		if err != nil {
-			return nil, err
+			return nil, 0, err
 		}
 		offset += n
 
 		kb = kb[0:keyLen]
 		if _, err := r.f.ReadAt(kb, offset); err != nil {
-			return nil, err
+			return nil, 0, err
 		}
 		offset += int64(keyLen)
 
@@ -68,26 +76,26 @@ func (r *Reader) Find(key string) ([]byte, error) {
 		var readKey string
 		var ts int64
 		if _, err := orderedcode.Parse(eKey, &readKey, orderedcode.Decr(&ts)); err != nil {
-			return nil, err
+			return nil, 0, err
 		}
 
 		if readKey == key {
 			value := make([]byte, valueLen)
 			if _, err := r.f.ReadAt(value, offset); err != nil {
-				return nil, err
+				return nil, 0, err
 			}
 			if value[0] == typeNil {
-				return nil, nil
+				return nil, ts, nil
 			}
-			return value[1:], nil
+			return value[1:], ts, nil
 		}
 		if readKey > key {
-			return nil, nil
+			return nil, 0, ErrNotFound
 		}
 
 		offset += int64(valueLen)
 	}
-	return nil, nil
+	return nil, 0, ErrNotFound
 }
 
 // verifyMagic returns true is magic at offset is valid.

@@ -20,31 +20,33 @@ func TestFind(t *testing.T) {
 		name    string
 		write   []kv
 		findKey string
-		want    []byte
+		wantV   []byte
+		wantTs  int64
+		wantErr error
 	}{
 		{
 			"Empty SST, not found.",
 			[]kv{},
 			"abc",
-			nil,
+			nil, 0, ErrNotFound,
 		},
 		{
 			"One nil-value entry SST, found.",
 			[]kv{kv{"a", 1, nil}},
 			"a",
-			nil,
+			nil, 1, nil,
 		},
 		{
 			"One entry SST, found.",
 			[]kv{kv{"a", 1, []byte("1")}},
 			"a",
-			[]byte("1"),
+			[]byte("1"), 1, nil,
 		},
 		{
 			"One entry SST, not found.",
 			[]kv{kv{"a", 1, []byte("1")}},
 			"ab",
-			nil,
+			nil, 0, ErrNotFound,
 		},
 		{
 			"Five entry SST, found start.",
@@ -56,7 +58,7 @@ func TestFind(t *testing.T) {
 				kv{"e", 1, []byte("5")},
 			},
 			"a",
-			[]byte("1"),
+			[]byte("1"), 1, nil,
 		},
 		{
 			"Five entry SST, found.",
@@ -68,7 +70,7 @@ func TestFind(t *testing.T) {
 				kv{"e", 1, []byte("5")},
 			},
 			"b",
-			[]byte("2"),
+			[]byte("2"), 10, nil,
 		},
 		{
 			"Five entry SST, found end.",
@@ -80,7 +82,7 @@ func TestFind(t *testing.T) {
 				kv{"e", 13, []byte("5")},
 			},
 			"e",
-			[]byte("5"),
+			[]byte("5"), 13, nil,
 		},
 		{
 			"Five entry SST, not found.",
@@ -92,7 +94,7 @@ func TestFind(t *testing.T) {
 				kv{"e", 13, []byte("5")},
 			},
 			"ee",
-			nil,
+			nil, 0, ErrNotFound,
 		},
 	}
 	for _, tt := range tests {
@@ -122,8 +124,8 @@ func TestFind(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			if got, err := r.Find(tt.findKey); err != nil || !cmp.Equal(got, tt.want) {
-				t.Errorf("Find(%v)=%v, error=%v want %v", tt.findKey, got, err, tt.want)
+			if gotV, gotTs, err := r.Find(tt.findKey); err != tt.wantErr || gotTs != tt.wantTs || !cmp.Equal(gotV, tt.wantV) {
+				t.Errorf("Find(%v)=%v,%v,%v want %v,%v,%v", tt.findKey, gotV, gotTs, err, tt.wantV, tt.wantTs, tt.wantErr)
 			}
 		})
 	}
