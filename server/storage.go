@@ -13,10 +13,11 @@ import (
 )
 
 type storage struct {
-	memtable *memtable.Memtable
-	opts     storageOptions
+	memtable  *memtable.Memtable
+	imemtable *memtable.Memtable
 
-	mu sync.Mutex
+	opts storageOptions
+	mu   sync.Mutex
 }
 
 type storageOptions struct {
@@ -44,7 +45,7 @@ func (s *storage) Apply(m *pb.Mutation) {
 		glog.Fatalf("Mutation with unrecognized type: %v", m)
 	}
 
-	if s.memtable.SizeBytes() > s.opts.memtableFlushSize {
+	if s.memtable.SizeBytes() > s.opts.memtableFlushSize && s.imemtable == nil {
 		go s.flushMemtable()
 	}
 }
@@ -60,6 +61,7 @@ func (s *storage) Find(key string) ([]byte, error) {
 func (s *storage) flushMemtable() {
 	s.mu.Lock()
 	m := s.memtable
+	s.imemtable = m
 	s.memtable = memtable.New()
 	s.mu.Unlock()
 
@@ -83,4 +85,8 @@ func (s *storage) flushMemtable() {
 	}
 
 	glog.Infof("flush completed for %v", fn)
+
+	s.mu.Lock()
+	s.imemtable = nil
+	s.mu.Unlock()
 }

@@ -19,24 +19,28 @@ func TestFind(t *testing.T) {
 		name    string
 		insert  []kv
 		findKey string
-		want    []byte
+		wantV   []byte
+		wantF   bool
 	}{
-		{"0 entry, not found", []kv{}, "abcd", nil},
-		{"1 entry, found", []kv{kv{"abc", 1, []byte("123")}}, "abc", []byte("123")},
-		{"1 entry, not found after", []kv{kv{"abc", 1, []byte("123")}}, "ab", nil},
-		{"1 entry, not found before", []kv{kv{"abc", 1, []byte("123")}}, "abcd", nil},
+		{"0 entry, not found", []kv{}, "abcd", nil, false},
+		{"1 entry, found", []kv{kv{"abc", 1, []byte("123")}}, "abc", []byte("123"), true},
+		{"1 entry, not found after", []kv{kv{"abc", 1, []byte("123")}}, "ab", nil, false},
+		{"1 entry, not found before", []kv{kv{"abc", 1, []byte("123")}}, "abcd", nil, false},
 		{"3 entry, find first",
 			[]kv{kv{"a", 1, []byte("1")}, kv{"b", 2, []byte("2")}, kv{"c", 3, []byte("3")}},
-			"a", []byte("1")},
+			"a", []byte("1"), true},
 		{"3 entry, find second",
 			[]kv{kv{"a", 3, []byte("1")}, kv{"b", 2, []byte("2")}, kv{"c", 1, []byte("3")}},
-			"b", []byte("2")},
+			"b", []byte("2"), true},
 		{"3 entry reversed, find second",
 			[]kv{kv{"c", 1, []byte("1")}, kv{"b", 2, []byte("2")}, kv{"a", 3, []byte("3")}},
-			"b", []byte("2")},
+			"b", []byte("2"), true},
 		{"3 entry same key, find first",
 			[]kv{kv{"a", 1, []byte("1")}, kv{"a", 20, []byte("2")}, kv{"a", 3, []byte("3")}},
-			"a", []byte("2")},
+			"a", []byte("2"), true},
+		{"3 entry, deletion marker",
+			[]kv{kv{"a", 1, []byte("1")}, kv{"b", 2, nil}, kv{"c", 3, []byte("3")}},
+			"b", nil, true},
 	}
 	for _, tt := range tests {
 		m := New()
@@ -45,8 +49,8 @@ func TestFind(t *testing.T) {
 				m.Insert(kv.Key, kv.Timestamp, kv.Value)
 			}
 
-			if got := m.Find(tt.findKey); !cmp.Equal(got, tt.want) {
-				t.Errorf("Find(%v) = %v, want %v.", tt.findKey, got, tt.want)
+			if gotV, gotF := m.Find(tt.findKey); !cmp.Equal(gotV, tt.wantV) || gotF != tt.wantF {
+				t.Errorf("Find(%v) = %v, %v, want %v, %v.", tt.findKey, gotV, gotF, tt.wantV, tt.wantF)
 			}
 		})
 	}
@@ -118,7 +122,7 @@ func TestRandomData(t *testing.T) {
 		for rk, want = range reference {
 			break
 		}
-		if got := m.Find(rk); !cmp.Equal(got, want.value) {
+		if got, _ := m.Find(rk); !cmp.Equal(got, want.value) {
 			t.Errorf("Find(%v) = %v, want %v",
 				hex.EncodeToString([]byte(rk)), hex.EncodeToString(got), hex.EncodeToString(want.value))
 		}
@@ -132,9 +136,9 @@ func TestRandomData(t *testing.T) {
 			continue
 		}
 
-		if got := m.Find(rk); got != nil {
-			t.Errorf("Find(%v) = %v, want nil",
-				hex.EncodeToString([]byte(rk)), hex.EncodeToString(got))
+		if gotV, gotF := m.Find(rk); gotV != nil || gotF != false {
+			t.Errorf("Find(%v) = %v, %v, want nil, false",
+				hex.EncodeToString([]byte(rk)), hex.EncodeToString(gotV), gotF)
 		}
 	}
 }
@@ -217,7 +221,7 @@ func BenchmarkFind(b *testing.B) {
 		}
 		b.StartTimer()
 
-		if m.Find(k) == nil {
+		if v, _ := m.Find(k); v == nil {
 			b.Errorf("Find(%v) was nil, expected not nil.", k)
 		}
 	}

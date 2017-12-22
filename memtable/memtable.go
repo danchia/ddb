@@ -114,8 +114,8 @@ func (m *Memtable) findGreaterOrEqual(key string, timestamp int64, prev []*node)
 	return nextAtLevel
 }
 
-// Find returns value of key at largest timestamp, or nil if not found.
-func (m *Memtable) Find(key string) []byte {
+// Find returns value of key at largest timestamp, which could be nil for a deletion marker.
+func (m *Memtable) Find(key string) (value []byte, found bool) {
 	if key == "" {
 		glog.Fatal("Invalid empty key.")
 	}
@@ -123,9 +123,9 @@ func (m *Memtable) Find(key string) []byte {
 	n := m.findGreaterOrEqual(key, math.MaxInt64, nil)
 
 	if n != nil && n.key == key {
-		return n.value
+		return n.value, true
 	}
-	return nil
+	return nil, false
 }
 
 // Iterator iterates entries in the memtable in ascending key order.
