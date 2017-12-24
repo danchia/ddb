@@ -109,6 +109,7 @@ func (s *Server) Set(ctx context.Context, req *pb.SetRequest) (*pb.SetResponse, 
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	// TODO: this needs to be monotonically increasing. hybrid logical clocks?
 	ts := time.Now().UnixNano() / 1000
 
 	l := &pb.LogRecord{
