@@ -3,7 +3,6 @@ package wal
 import (
 	"io/ioutil"
 	"os"
-	"path/filepath"
 	"testing"
 
 	pb "github.com/danchia/ddb/proto"
@@ -16,9 +15,12 @@ func TestReadWrite(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer os.RemoveAll(dir)
-	fname := filepath.Join(dir, "1.log")
+	opts := Options{
+		Dirname:    dir,
+		TargetSize: 50,
+	}
 
-	w, err := NewWriter(fname, 1)
+	w, err := NewWriter(1, opts)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -41,7 +43,7 @@ func TestReadWrite(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	s, err := NewScanner(fname)
+	s, err := NewScanner(dir)
 	records := make([]*pb.LogRecord, 0)
 
 	for s.Scan() {
@@ -52,7 +54,7 @@ func TestReadWrite(t *testing.T) {
 		t.Fatal(s.Err())
 	}
 	if len(expectedRecords) != len(records) {
-		t.Errorf("TestReadWrite wrote %d records, read %d records.",
+		t.Fatalf("TestReadWrite wrote %d records, read %d records.",
 			len(expectedRecords), len(records))
 	}
 	for i, e := range expectedRecords {

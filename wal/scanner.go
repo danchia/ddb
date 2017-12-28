@@ -6,27 +6,143 @@ import (
 	"hash"
 	"hash/crc32"
 	"io"
+	"io/ioutil"
 	"os"
+	"path/filepath"
+	"strings"
+
+	"github.com/golang/glog"
 
 	pb "github.com/danchia/ddb/proto"
 	"github.com/golang/protobuf/proto"
 )
 
-// Scanner reads log records from a write ahead log.
+// Scanner reads log records from a write ahead log directory.
 // Not thread-safe.
 type Scanner struct {
+	dirname string
+	// list of log files to scan, in ascending seqNo.
+	filenameInfos []filenameInfo
+
+	curIndex   int
+	curScanner *fileScanner
+
+	err error
+}
+
+func NewScanner(dirname string) (*Scanner, error) {
+	fis, err := ioutil.ReadDir(dirname)
+	if err != nil {
+		return nil, err
+	}
+	parsedNames := make([]filenameInfo, 0, len(fis))
+	for _, fi := range fis {
+		name := fi.Name()
+		if !(strings.HasPrefix(name, "wal-") && strings.HasSuffix(name, ".log")) {
+			glog.Warningf("Skipping file %v in WAL directory, does not appear to be a WAL file.", name)
+			continue
+		}
+
+		pn, err := parseFilename(name)
+		if err != nil {
+			return nil, err
+		}
+		parsedNames = append(parsedNames, pn)
+	}
+
+	return &Scanner{dirname: dirname, filenameInfos: parsedNames}, nil
+}
+
+// Scan advances the fileScanner to the next log record, which will then be
+// available through the Record method. It returns false when the scan stops,
+// either by reaching the end of all logs or on error.
+func (s *Scanner) Scan() bool {
+	for {
+		if !s.maybeAdvanceFileScanner() {
+			return false
+		}
+
+		hasNext := s.curScanner.Scan()
+		if hasNext {
+			return true
+		}
+		if s.curScanner.Err() != nil {
+			return false
+		}
+		// reached end of current file
+		s.curScanner = nil
+	}
+}
+
+// returns whether attempted advance was successful
+func (s *Scanner) maybeAdvanceFileScanner() bool {
+	if s.curScanner == nil {
+		if s.curIndex >= len(s.filenameInfos) {
+			return false
+		}
+		fi := s.filenameInfos[s.curIndex]
+		s.curIndex++
+
+		fileScanner, err := newFileScanner(filepath.Join(s.dirname, fi.name))
+		if err != nil {
+			s.err = err
+			return false
+		}
+		s.curScanner = fileScanner
+	}
+	return true
+}
+
+// Record returns the current record.
+// Only valid until the next Scan() call.
+// Caller should not modify returned proto.
+func (s *Scanner) Record() *pb.LogRecord {
+	return s.curScanner.Record()
+}
+
+// Err returns last error, if any.
+func (s *Scanner) Err() error {
+	if s.err != nil {
+		return s.err
+	}
+	if s.curScanner != nil {
+		return s.curScanner.err
+	}
+	return nil
+}
+
+type filenameInfo struct {
+	name  string
+	seqNo int64
+}
+
+func parseFilename(n string) (filenameInfo, error) {
+	var seqNo int64
+	if _, err := fmt.Sscanf(n, "wal-%d.log", &seqNo); err != nil {
+		return filenameInfo{}, err
+	}
+
+	return filenameInfo{
+		name:  n,
+		seqNo: seqNo,
+	}, nil
+}
+
+// fileScanner reads log records from a write ahead log.
+// Not thread-safe.
+type fileScanner struct {
 	f   *os.File
 	err error
 	l   *pb.LogRecord
 	h   hash.Hash32
 }
 
-func NewScanner(name string) (*Scanner, error) {
+func newFileScanner(name string) (*fileScanner, error) {
 	f, err := os.Open(name)
 	if err != nil {
 		return nil, err
 	}
-	s := &Scanner{
+	s := &fileScanner{
 		f: f,
 		l: &pb.LogRecord{},
 		h: crc32.New(crcTable),
@@ -34,10 +150,10 @@ func NewScanner(name string) (*Scanner, error) {
 	return s, nil
 }
 
-// Scan advances the Scanner to the next log record, which will then be
+// Scan advances the fileScanner to the next log record, which will then be
 // available through the Record method. It returns false when the scan stops,
 // either by reaching the end of the log or on error.
-func (s *Scanner) Scan() bool {
+func (s *fileScanner) Scan() bool {
 	s.l.Reset()
 
 	var scratch [8]byte
@@ -63,7 +179,7 @@ func (s *Scanner) Scan() bool {
 	}
 	c := s.h.Sum32()
 	if c != crc {
-		s.err = fmt.Errorf("Checksum mismatch. Expected %d, got %d.", crc, c)
+		s.err = fmt.Errorf("checksum mismatch. expected %d, got %d", crc, c)
 		return false
 	}
 
@@ -77,11 +193,11 @@ func (s *Scanner) Scan() bool {
 // Returns the current record.
 // Only valid until the next Scan() call.
 // Caller should not modify returned proto.
-func (s *Scanner) Record() *pb.LogRecord {
+func (s *fileScanner) Record() *pb.LogRecord {
 	return s.l
 }
 
 // Returns last error, if any.
-func (s *Scanner) Err() error {
+func (s *fileScanner) Err() error {
 	return s.err
 }

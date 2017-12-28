@@ -10,10 +10,12 @@ import (
 	"sync"
 
 	pb "github.com/danchia/ddb/proto"
+	"github.com/golang/glog"
 	"github.com/golang/protobuf/proto"
 )
 
 const (
+	// MaxRecordBytes is the largest size a single record can be.
 	MaxRecordBytes uint32 = 100 * 1024 * 1024
 )
 
@@ -30,29 +32,74 @@ type Writer struct {
 	buf       *proto.Buffer
 	crc       hash.Hash32
 	nextSeq   int64
+	opts      Options
+	filename  string
+	size      int64
 }
 
-func NewWriter(name string, nextSeq int64) (*Writer, error) {
-	f, err := os.Create(name)
-	if err != nil {
+type Options struct {
+	Dirname    string
+	TargetSize int64
+}
+
+func NewWriter(nextSeq int64, opts Options) (*Writer, error) {
+	wal := &Writer{
+		buf:     proto.NewBuffer(nil),
+		crc:     crc32.New(crcTable),
+		nextSeq: nextSeq,
+		opts:    opts,
+	}
+
+	if err := wal.rollover(); err != nil {
 		return nil, err
 	}
 
-	wal := &Writer{
-		f:         f,
-		bufWriter: bufio.NewWriter(f),
-		buf:       proto.NewBuffer(nil),
-		crc:       crc32.New(crcTable),
-		nextSeq:   nextSeq,
+	return wal, nil
+}
+
+func logName(nextSeq int64, o Options) string {
+	return fmt.Sprintf("%s%cwal-%d.log", o.Dirname, os.PathSeparator, nextSeq)
+}
+
+func (w *Writer) rollover() error {
+	fn := logName(w.nextSeq, w.opts)
+
+	glog.Infof("Rolling over WAL from %v to %v.", w.filename, fn)
+
+	if w.bufWriter != nil {
+		if err := w.bufWriter.Flush(); err != nil {
+			return err
+		}
+		if err := w.f.Sync(); err != nil {
+			return err
+		}
+		if err := w.f.Close(); err != nil {
+			return err
+		}
+	}
+	f, err := os.Create(fn)
+	if err != nil {
+		return err
 	}
 
-	return wal, nil
+	w.filename = fn
+	w.f = f
+	w.bufWriter = bufio.NewWriter(f)
+
+	return nil
 }
 
 // Append appends a log record to the WAL. The log record is modified with the log sequence number.
 func (w *Writer) Append(l *pb.LogRecord) error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
+
+	if w.size > w.opts.TargetSize {
+		if err := w.rollover(); err != nil {
+			glog.Warningf("Error while attempting to rollover WAL: %v", err)
+			return err
+		}
+	}
 
 	l.Sequence = w.nextSeq
 	w.nextSeq++

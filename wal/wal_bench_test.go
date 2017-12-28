@@ -3,7 +3,6 @@ package wal
 import (
 	"io/ioutil"
 	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 
@@ -27,7 +26,6 @@ func benchmark(b *testing.B, dataSize, batchSize int) {
 		b.Fatal(err)
 	}
 	defer os.RemoveAll(dir)
-	fname := filepath.Join(dir, "1.log")
 
 	l := &pb.LogRecord{
 		Mutation: &pb.Mutation{
@@ -38,7 +36,8 @@ func benchmark(b *testing.B, dataSize, batchSize int) {
 	}
 	b.SetBytes(int64(proto.Size(l)))
 
-	w, err := NewWriter(fname, 0)
+	opts := Options{Dirname: dir, TargetSize: 128 * 1024 * 1024}
+	w, err := NewWriter(0, opts)
 	if err != nil {
 		b.Fatal(err)
 	}
