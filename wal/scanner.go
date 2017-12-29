@@ -30,6 +30,8 @@ type Scanner struct {
 	err error
 }
 
+// NewScanner returns a log scanner over all the log files found in dirname.
+// Returns ErrNotExist if there are no log files.
 func NewScanner(dirname string) (*Scanner, error) {
 	fis, err := ioutil.ReadDir(dirname)
 	if err != nil {
@@ -48,6 +50,10 @@ func NewScanner(dirname string) (*Scanner, error) {
 			return nil, err
 		}
 		parsedNames = append(parsedNames, pn)
+	}
+
+	if len(parsedNames) == 0 {
+		return nil, os.ErrNotExist
 	}
 
 	return &Scanner{dirname: dirname, filenameInfos: parsedNames}, nil

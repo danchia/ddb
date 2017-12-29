@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"os"
+	"path/filepath"
 	"sync"
 	"time"
 
@@ -21,25 +22,49 @@ const (
 type Server struct {
 	mu sync.Mutex
 
+	opts Options
+
 	storage   *storage
 	logWriter *wal.Writer
 }
 
-func NewServer() *Server {
-	s := Server{}
+type Options struct {
+	SstDir            string
+	MemtableFlushSize int64
+
+	LogDir        string
+	TargetLogSize int64
+}
+
+func DefaultOptions(baseDir string) Options {
+	return Options{
+		SstDir:            filepath.Join(baseDir, "ddb_sst"),
+		MemtableFlushSize: 64 * 1024 * 1024,
+
+		LogDir:        filepath.Join(baseDir, "ddb_log"),
+		TargetLogSize: 8 * 1024 * 1024,
+	}
+}
+
+func NewServer(opts Options) *Server {
+	s := Server{opts: opts}
+
+	ensureDir(opts.LogDir)
+	ensureDir(opts.SstDir)
 
 	storageOpts := storageOptions{
-		sstDir:            "/tmp/ddb_sst",
-		memtableFlushSize: 100,
+		sstDir:            opts.SstDir,
+		memtableFlushSize: opts.MemtableFlushSize,
 	}
 	s.storage = newStorage(storageOpts)
 
-	if err := s.recoverLog(); err != nil {
+	nextSeq, err := s.recoverLog()
+	if err != nil {
 		glog.Fatalf("Failed to recover log file: %v", err)
 	}
 
-	// FIXME: next seqno should be from recovered log.
-	logWriter, err := wal.NewWriter("/tmp/ddb.log", 1)
+	logOpts := wal.Options{Dirname: opts.LogDir, TargetSize: opts.TargetLogSize}
+	logWriter, err := wal.NewWriter(nextSeq, logOpts)
 	if err != nil {
 		glog.Fatalf("Error creating WAL writer: %v", err)
 	}
@@ -48,17 +73,24 @@ func NewServer() *Server {
 	return &s
 }
 
-func (s *Server) recoverLog() error {
-	sc, err := wal.NewScanner("/tmp/ddb.log")
+func ensureDir(dir string) {
+	if err := os.MkdirAll(dir, 0777); err != nil {
+		glog.Fatalf("error while ensuring directory %v: %v", dir, err)
+	}
+}
+
+func (s *Server) recoverLog() (nextSeq int64, err error) {
+	sc, err := wal.NewScanner("/tmp/ddb_log")
 	if os.IsNotExist(err) {
 		glog.Infof("no log files found")
-		return nil
+		return 0, nil
 	}
 	if err != nil {
-		return err
+		return 0, err
 	}
 
 	n := int64(0)
+	seqNo := int64(-1)
 
 	for sc.Scan() {
 		r := sc.Record()
@@ -68,6 +100,7 @@ func (s *Server) recoverLog() error {
 			glog.V(4).Infof("Read wal record: %v", r)
 		}
 
+		seqNo = r.Sequence
 		if r.Mutation == nil {
 			glog.Fatalf("Record %d had no mutation: %v", n, r)
 		}
@@ -76,7 +109,12 @@ func (s *Server) recoverLog() error {
 
 	glog.Infof("Scanned %d log entries.", n)
 
-	return sc.Err()
+	if seqNo == -1 {
+		// TODO: it's possible that if we truncate the log and don't have any new mutations
+		// we won't get a sequence number, even if we can recover it from the file metadata.
+		glog.Fatalf("seqNo was not recovered")
+	}
+	return seqNo, sc.Err()
 }
 
 func (s *Server) Get(ctx context.Context, req *pb.GetRequest) (*pb.GetResponse, error) {

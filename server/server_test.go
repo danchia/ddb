@@ -3,6 +3,8 @@ package server
 import (
 	"bytes"
 	"context"
+	"io/ioutil"
+	"os"
 	"strings"
 	"testing"
 
@@ -13,11 +15,16 @@ import (
 )
 
 func TestSetThenGet(t *testing.T) {
-	s := NewServer()
+	dir, err := ioutil.TempDir("", "waltest")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(dir)
+	s := NewServer(DefaultOptions(dir))
 
 	key := "abcd"
 	value := []byte{1, 2, 3, 4}
-	_, err := s.Set(context.Background(), &pb.SetRequest{Key: key, Value: value})
+	_, err = s.Set(context.Background(), &pb.SetRequest{Key: key, Value: value})
 	if err != nil {
 		t.Errorf("Set - Unexpected error %v", err)
 	}
@@ -33,7 +40,12 @@ func TestSetThenGet(t *testing.T) {
 }
 
 func TestGetNotFound(t *testing.T) {
-	s := NewServer()
+	dir, err := ioutil.TempDir("", "waltest")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(dir)
+	s := NewServer(DefaultOptions(dir))
 
 	r, err := s.Get(context.Background(), &pb.GetRequest{Key: "blah"})
 	if r != nil {
@@ -49,7 +61,12 @@ func TestGetNotFound(t *testing.T) {
 }
 
 func TestInvalidKeyGet(t *testing.T) {
-	s := NewServer()
+	dir, err := ioutil.TempDir("", "waltest")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(dir)
+	s := NewServer(DefaultOptions(dir))
 
 	var tests = []struct {
 		key  string
@@ -75,7 +92,12 @@ func TestInvalidKeyGet(t *testing.T) {
 }
 
 func TestInvalidSet(t *testing.T) {
-	s := NewServer()
+	dir, err := ioutil.TempDir("", "waltest")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(dir)
+	s := NewServer(DefaultOptions(dir))
 
 	var tests = []struct {
 		key   string
