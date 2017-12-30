@@ -85,6 +85,7 @@ func (w *Writer) rollover() error {
 	w.filename = fn
 	w.f = f
 	w.bufWriter = bufio.NewWriter(f)
+	w.size = 0
 
 	return nil
 }
@@ -129,6 +130,7 @@ func (w *Writer) Append(l *pb.LogRecord) error {
 	if err != nil {
 		return err
 	}
+	w.size += int64(dataLen) + 8
 
 	_, err = w.bufWriter.Write(data)
 	if err != nil {
