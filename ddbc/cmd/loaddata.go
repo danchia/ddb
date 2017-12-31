@@ -29,9 +29,11 @@ var loaddataCmd = &cobra.Command{
 			log.Fatal(err)
 		}
 
+		keyGen := newKeyGenerator()
+
 		for i := 0; i < n; i++ {
 			req := &pb.SetRequest{
-				Key:   genKey(),
+				Key:   keyGen.next(),
 				Value: genValue(),
 			}
 			_, err := c.Set(context.Background(), req)
@@ -46,10 +48,18 @@ var loaddataCmd = &cobra.Command{
 
 const keyAlpha = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvyxyz1234567890"
 
-func genKey() string {
+type keyGenerator struct {
+	rnd *rand.Rand
+}
+
+func newKeyGenerator() *keyGenerator {
+	return &keyGenerator{rand.New(rand.NewSource(1))}
+}
+
+func (g *keyGenerator) next() string {
 	var buf bytes.Buffer
 	for i := 0; i < keySize; i++ {
-		buf.WriteByte(keyAlpha[rand.Intn(len(keyAlpha))])
+		buf.WriteByte(keyAlpha[g.rnd.Intn(len(keyAlpha))])
 	}
 	return buf.String()
 }
