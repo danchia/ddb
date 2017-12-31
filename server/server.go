@@ -39,7 +39,7 @@ type Options struct {
 func DefaultOptions(baseDir string) Options {
 	return Options{
 		SstDir:            filepath.Join(baseDir, "ddb_sst"),
-		MemtableFlushSize: 64 * 1024 * 1024,
+		MemtableFlushSize: 16 * 1024 * 1024,
 
 		LogDir:        filepath.Join(baseDir, "ddb_log"),
 		TargetLogSize: 8 * 1024 * 1024,
