@@ -43,10 +43,10 @@ func TestFind(t *testing.T) {
 			"b", nil, true},
 	}
 	for _, tt := range tests {
-		m := New()
+		m := New(0)
 		t.Run(tt.name, func(t *testing.T) {
-			for _, kv := range tt.insert {
-				m.Insert(kv.Key, kv.Timestamp, kv.Value)
+			for i, kv := range tt.insert {
+				m.Insert(int64(i+1), kv.Key, kv.Timestamp, kv.Value)
 			}
 
 			if gotV, gotF := m.Find(tt.findKey); !cmp.Equal(gotV, tt.wantV) || gotF != tt.wantF {
@@ -77,10 +77,10 @@ func TestIterator(t *testing.T) {
 			[]kv{kv{"a", 3, []byte("1")}, kv{"b", 25, []byte("3")}, kv{"c", 100, []byte("2")}}},
 	}
 	for _, tt := range tests {
-		m := New()
+		m := New(0)
 		t.Run(tt.name, func(t *testing.T) {
-			for _, kv := range tt.insert {
-				m.Insert(kv.Key, kv.Timestamp, kv.Value)
+			for i, kv := range tt.insert {
+				m.Insert(int64(i+1), kv.Key, kv.Timestamp, kv.Value)
 			}
 			got := make([]kv, 0)
 
@@ -105,14 +105,14 @@ func TestRandomData(t *testing.T) {
 	}
 
 	reference := make(map[string]tv)
-	m := New()
+	m := New(0)
 
 	for i := 0; i < 100000; i++ {
 		k := randomString(1, 30)
 		v := randomBytes(5, 50)
 		ts := int64(i)
 		reference[k] = tv{ts, v}
-		m.Insert(k, ts, v)
+		m.Insert(int64(i+1), k, ts, v)
 	}
 
 	// perform some random probes of keys that exist
@@ -144,7 +144,7 @@ func TestRandomData(t *testing.T) {
 }
 
 func TestPickLevel(t *testing.T) {
-	m := New()
+	m := New(0)
 
 	counts := make(map[int]int)
 	trials := 10000000
@@ -165,8 +165,9 @@ func TestPickLevel(t *testing.T) {
 
 func BenchmarkInsert(b *testing.B) {
 	reference := make(map[string]struct{})
-	m := New()
+	m := New(0)
 	v := randomBytes(5, 50)
+	seq := int64(1)
 
 	// pre-seed data
 	for i := 0; i < 100000; i++ {
@@ -176,7 +177,8 @@ func BenchmarkInsert(b *testing.B) {
 			continue
 		}
 		reference[k] = struct{}{}
-		m.Insert(k, int64(i), v)
+		m.Insert(seq, k, int64(i), v)
+		seq++
 	}
 
 	b.StopTimer()
@@ -190,7 +192,8 @@ func BenchmarkInsert(b *testing.B) {
 		reference[k] = struct{}{}
 
 		b.StartTimer()
-		m.Insert(k, int64(i), v)
+		m.Insert(seq, k, int64(i), v)
+		seq++
 		b.StopTimer()
 	}
 
@@ -198,7 +201,7 @@ func BenchmarkInsert(b *testing.B) {
 
 func BenchmarkFind(b *testing.B) {
 	reference := make(map[string]struct{})
-	m := New()
+	m := New(0)
 	v := randomBytes(5, 50)
 
 	// pre-seed data
@@ -209,7 +212,7 @@ func BenchmarkFind(b *testing.B) {
 			continue
 		}
 		reference[k] = struct{}{}
-		m.Insert(k, int64(i), v)
+		m.Insert(int64(i+1), k, int64(i), v)
 	}
 
 	b.ResetTimer()

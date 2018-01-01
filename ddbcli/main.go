@@ -24,7 +24,7 @@ func main() {
 		glog.Fatalf("Failed to listen: %v", err)
 	}
 	gs := grpc.NewServer()
-	ds := server.NewServer(server.DefaultOptions("/tmp"))
+	ds := server.NewServer(server.DefaultOptions("/tmp/ddb"))
 	pb.RegisterDdbServer(gs, ds)
 
 	reflection.Register(gs)

@@ -15,6 +15,8 @@ It has these top-level messages:
 	SetResponse
 	LogRecord
 	Mutation
+	DescriptorProto
+	SstMeta
 */
 package ddb
 

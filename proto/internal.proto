@@ -26,3 +26,15 @@ message Mutation {
   // For mutations that update, this is the value.
   bytes value = 4;
 }
+
+message DescriptorProto {
+  repeated SstMeta sst_meta = 1;
+}
+
+message SstMeta {
+  // Filename is the name of the SST file, relative to the configured SST directory.
+  string filename = 1;
+
+  // The sequence number (inclusive) of mutations that have been applied.
+  int64 applied_until = 2;
+}

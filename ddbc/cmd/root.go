@@ -8,6 +8,7 @@ import (
 )
 
 var serverAddr string
+var baseDir string
 
 // rootCmd represents the base command when called without any subcommands
 var rootCmd = &cobra.Command{
@@ -27,4 +28,5 @@ func Execute() {
 
 func init() {
 	rootCmd.PersistentFlags().StringVar(&serverAddr, "addr", "localhost:9090", "server address, host:port")
+	rootCmd.PersistentFlags().StringVar(&baseDir, "base_dir", "/tmp/ddb", "DDB base directory.")
 }
