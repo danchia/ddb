@@ -2,6 +2,12 @@
 
 
 [[projects]]
+  name = "github.com/davecgh/go-spew"
+  packages = ["spew"]
+  revision = "346938d642f2ec3594ed81d874461961cd0faa76"
+  version = "v1.1.0"
+
+[[projects]]
   branch = "master"
   name = "github.com/golang/glog"
   packages = ["."]
@@ -76,6 +82,6 @@
 [solve-meta]
   analyzer-name = "dep"
   analyzer-version = 1
-  inputs-digest = "1e1a11354a8a8f4981a860eb5778271175b83106c0cc20ab935ba3e36e4ba709"
+  inputs-digest = "7714aa9795ec72f7d22596188d2d9d71afd1c53e83f43e8a767da1464d4a5a18"
   solver-name = "gps-cdcl"
   solver-version = 1

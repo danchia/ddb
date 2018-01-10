@@ -4,25 +4,48 @@ import (
 	"html/template"
 	"net"
 	"net/http"
+	"strconv"
 	"sync"
+	"time"
 
 	"go.opencensus.io/trace"
 
+	"github.com/davecgh/go-spew/spew"
 	"github.com/golang/glog"
 )
 
 // Traces handles debug requests calls.
+// Inspired heavily by golang.org/x/net/trace/trace.go
 func Traces(w http.ResponseWriter, req *http.Request) {
 	if !isAllowed(req) {
 		http.Error(w, "Unauthorized.", http.StatusUnauthorized)
 		return
 	}
 
-	w.Header().Set("Content-Type", "text/html")
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 
 	data := &traceDisplay{
 		Summary: trace.SampledSpansSummary(),
 	}
+	if req.FormValue("fam") != "" {
+		data.DisplayFamily = req.FormValue("fam")
+		bucket, err := strconv.Atoi(req.FormValue("b"))
+		if err != nil {
+			glog.Warningf("trace debug failed parse arg: $v", err)
+			return
+		}
+		if bucket == -1 {
+			data.MinLatency = 0
+			data.Spans = trace.ActiveSpans(data.DisplayFamily)
+		} else {
+			methodSummary := data.Summary[data.DisplayFamily]
+			bs := methodSummary.LatencyBuckets[bucket]
+			data.MinLatency = bs.MinLatency
+			data.Spans = trace.LatencySampledSpans(data.DisplayFamily, bs.MinLatency, bs.MaxLatency)
+		}
+	}
+
+	glog.V(2).Infof("data: %v", data)
 
 	if err := traceTmpl().ExecuteTemplate(w, "trace", data); err != nil {
 		glog.Warningf("trace debug failed execute template: %v", err)
@@ -31,6 +54,10 @@ func Traces(w http.ResponseWriter, req *http.Request) {
 
 type traceDisplay struct {
 	Summary map[string]trace.PerMethodSummary
+
+	DisplayFamily string
+	MinLatency    time.Duration
+	Spans         []*trace.SpanData
 }
 
 func isAllowed(r *http.Request) bool {
@@ -51,7 +78,9 @@ var traceTemplateOnce sync.Once
 
 func traceTmpl() *template.Template {
 	traceTemplateOnce.Do(func() {
-		traceTmplCache = template.Must(template.New("trace").Parse(traceHTML))
+		traceTmplCache = template.Must(template.New("trace").Funcs(template.FuncMap{
+			"sdump": spew.Sdump,
+		}).Parse(traceHTML))
 	})
 	return traceTmplCache
 }
@@ -67,16 +96,26 @@ const traceHTML = `
 				{{$fam}}
 				</td>
 				<td>
+					<a href="?fam={{$fam}}&b=-1">
 					{{ $summary.Active }} active
+					</a>
 				</td>
-				{{ range $lb := $summary.LatencyBuckets }}
+				{{ range $i, $lb := $summary.LatencyBuckets }}
 					<td>
-						[{{ $lb.MinLatency }} - {{ $lb.MaxLatency }}]
+						<a href="?fam={{$fam}}&b={{$i}}">
+						[{{ $lb.MinLatency }} - {{ $lb.MaxLatency }} ({{$lb.Size}})]
+						</a>
 					</td>
 				{{ end }}
 			</tr>
 		{{ end }}
 		</table>
+		{{ if .DisplayFamily }}
+			<h2>{{.DisplayFamily}} {{.MinLatency}}</h2>
+			{{ range $span := .Spans }}
+				<p><pre>{{sdump $span}}</pre></p>
+			{{ end }}
+		{{ end }}
 	</body>
 </html>
 `
