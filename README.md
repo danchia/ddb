@@ -17,7 +17,7 @@ I will be documenting my thoughts and reflections as I go along on Medium.
 ## Roadmap
 
 ### Storage Engine
- - [ ] WAL rotation / truncation
+ - [x] WAL rotation / truncation
  - [ ] SSTable indexes
  - [ ] SSTable key compression
  - [ ] SSTable block compression
@@ -33,5 +33,6 @@ I will be documenting my thoughts and reflections as I go along on Medium.
  - [ ] Replicate vs Paxos or Raft.
 
 ### Debug / Monitoring
- - [ ] Add stats and tracing framework (Census or other)
+ - [ ] Add stats framework
+ - [x] Add tracing framework (Census or other)
  - [ ] Add debug z pages.
