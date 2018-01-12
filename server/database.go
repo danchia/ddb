@@ -14,6 +14,7 @@ import (
 	"github.com/danchia/ddb/sst"
 	"github.com/danchia/ddb/wal"
 	"github.com/golang/glog"
+	"go.opencensus.io/trace"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
@@ -155,12 +156,15 @@ func (d *database) Set(ctx context.Context, req *pb.SetRequest) (*pb.SetResponse
 		},
 	}
 
+	trace.Print(ctx, "appending to log")
 	if err := d.logWriter.Append(l); err != nil {
 		return nil, err
 	}
+	trace.Print(ctx, "syncing log")
 	if err := d.logWriter.Sync(); err != nil {
 		return nil, err
 	}
+	trace.Print(ctx, "sync log done")
 
 	d.apply(l)
 	d.maybeTriggerFlush()

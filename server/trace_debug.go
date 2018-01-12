@@ -113,7 +113,17 @@ const traceHTML = `
 		{{ if .DisplayFamily }}
 			<h2>{{.DisplayFamily}} {{.MinLatency}}</h2>
 			{{ range $span := .Spans }}
-				<p><pre>{{sdump $span}}</pre></p>
+
+				<p style="font-family: monospace">
+					<b>{{ $span.Name }}</b>. TraceID: {{$span.TraceID}} SpanID: {{$span.SpanID}} ParentSpanID: {{$span.ParentSpanID}}<br>
+					{{ $span.Attributes }} <br>
+					{{ $span.StartTime }} Start<br>
+					{{ range $ann := $span.Annotations }}
+					{{ $ann.Time }} {{ $ann.Message }} {{ $ann.Attributes }}<br>
+					{{ end }}
+					{{ $span.EndTime }} Finish with Status {{ $span.Status.Code }}. {{ $span.Status.Message }}
+				</p>
+
 			{{ end }}
 		{{ end }}
 	</body>
