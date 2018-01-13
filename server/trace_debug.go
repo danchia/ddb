@@ -80,6 +80,16 @@ func traceTmpl() *template.Template {
 	traceTemplateOnce.Do(func() {
 		traceTmplCache = template.Must(template.New("trace").Funcs(template.FuncMap{
 			"sdump": spew.Sdump,
+			"tsub": func(a, b time.Time) time.Duration {
+				return a.Sub(b)
+			},
+			"tdelta": func(idx int, span *trace.SpanData) time.Duration {
+				ann := span.Annotations[idx]
+				if idx == 0 {
+					return ann.Time.Sub(span.StartTime)
+				}
+				return ann.Time.Sub(span.Annotations[idx-1].Time)
+			},
 		}).Parse(traceHTML))
 	})
 	return traceTmplCache
@@ -87,7 +97,14 @@ func traceTmpl() *template.Template {
 
 const traceHTML = `
 <html>
-	<head><title>ddebug/requests</title></head>
+	<head>
+		<title>ddebug/requests</title>
+		<style>
+			.trace-data {
+				font-family: monospace;
+			}
+		</style>
+	</head>
 	<body>
 		<table>
 		{{ range $fam, $summary := .Summary }}
@@ -113,15 +130,22 @@ const traceHTML = `
 		{{ if .DisplayFamily }}
 			<h2>{{.DisplayFamily}} {{.MinLatency}}</h2>
 			{{ range $span := .Spans }}
-
-				<p style="font-family: monospace">
-					<b>{{ $span.Name }}</b>. TraceID: {{$span.TraceID}} SpanID: {{$span.SpanID}} ParentSpanID: {{$span.ParentSpanID}}<br>
+				<p class="trace-data">
+					<b>{{ $span.Name }}</b>. {{ tsub $span.EndTime $span.StartTime }} TraceID: {{$span.TraceID}} SpanID: {{$span.SpanID}} ParentSpanID: {{$span.ParentSpanID}}<br>
 					{{ $span.Attributes }} <br>
-					{{ $span.StartTime }} Start<br>
-					{{ range $ann := $span.Annotations }}
-					{{ $ann.Time }} {{ $ann.Message }} {{ $ann.Attributes }}<br>
+					<table>
+					<tr>
+						<td>{{ $span.StartTime }}</td> <td style="width:30px;padding-left:10px">0ms</td> <td>Start</td>
+					</tr>
+					{{ range $idx, $ann := $span.Annotations }}
+						<tr>
+							<td>{{ $ann.Time }}</td> <td>{{ tdelta $idx $span }}</td> <td>{{ $ann.Message }}</td> <td>{{ $ann.Attributes }}</td>
+						</tr>
 					{{ end }}
-					{{ $span.EndTime }} Finish with Status {{ $span.Status.Code }}. {{ $span.Status.Message }}
+					<tr>
+						<td>{{ $span.EndTime }}</td> <td>{{ tsub $span.EndTime $span.StartTime }}</td> <td>Finish with Status {{ $span.Status.Code }}. {{ $span.Status.Message }}</td>
+					</tr>
+					</table>
 				</p>
 
 			{{ end }}
