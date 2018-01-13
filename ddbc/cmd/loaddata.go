@@ -75,7 +75,7 @@ func genValue() []byte {
 func init() {
 	rootCmd.AddCommand(loaddataCmd)
 
-	loaddataCmd.Flags().IntVar(&keySize, "key_size", 100, "Key length")
-	loaddataCmd.Flags().IntVar(&valueSize, "value_size", 1024, "Value length")
+	loaddataCmd.Flags().IntVar(&keySize, "key_size", 10, "Key length")
+	loaddataCmd.Flags().IntVar(&valueSize, "value_size", 800, "Value length")
 	loaddataCmd.Flags().IntVar(&n, "n", 1000, "Number of entries")
 }
