@@ -186,7 +186,8 @@ func (d *database) apply(l *pb.LogRecord) {
 
 func (d *database) maybeTriggerFlush() {
 	if d.memtable.SizeBytes() > d.opts.MemtableFlushSize && d.imemtable == nil {
-		go d.flushMemtable()
+		d.swapMemtableLocked()
+		go d.flushIMemtable()
 	}
 }
 
@@ -231,15 +232,18 @@ func (d *database) Find(ctx context.Context, key string) ([]byte, error) {
 	return value, nil
 }
 
-func (d *database) flushMemtable() {
-	// TODO: ensure flushes happen serially.
-
-	d.mu.Lock()
+func (d *database) swapMemtableLocked() {
 	m := d.memtable
 	d.imemtable = m
 	d.memtable = memtable.New(m.SequenceUpper())
-	d.mu.Unlock()
+}
 
+func (d *database) flushIMemtable() {
+	if d.imemtable == nil {
+		glog.Fatalf("flushIMemtable called when imemtable == nil")
+	}
+
+	m := d.imemtable
 	ts := time.Now().UnixNano()
 	fn := fmt.Sprintf("%020d.sst", ts)
 	fullFn := filepath.Join(d.opts.SstDir, fn)
