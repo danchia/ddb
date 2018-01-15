@@ -2,16 +2,25 @@ package sst
 
 import (
 	"bufio"
+	"bytes"
+	"encoding/binary"
+	"hash"
+	"hash/crc32"
 	"os"
 
 	"github.com/golang/glog"
-	"github.com/google/orderedcode"
 )
 
 type Writer struct {
-	f      *os.File
-	w      *bufio.Writer
-	tmpKey []byte
+	f   *os.File
+	w   *bufio.Writer
+	crc hash.Hash32
+
+	lastKey string
+	offset  uint64
+
+	dataBlockB  *dataBlockBuilder
+	indexBlockB *indexBlockBuilder
 }
 
 func NewWriter(filename string) (*Writer, error) {
@@ -21,11 +30,11 @@ func NewWriter(filename string) (*Writer, error) {
 	}
 
 	w := &Writer{
-		f: f,
-		w: bufio.NewWriter(f),
-	}
-	if err := writeUint64(w.w, SstMagic); err != nil {
-		return nil, err
+		f:           f,
+		w:           bufio.NewWriter(f),
+		crc:         crc32.New(crcTable),
+		dataBlockB:  newDataBlockBuilder(),
+		indexBlockB: newIndexBlockBuilder(),
 	}
 	return w, nil
 }
@@ -33,43 +42,94 @@ func NewWriter(filename string) (*Writer, error) {
 // Append writes a new row to the SSTable.
 // Must be called in order, i.e. key asc, timestamp desc
 func (s *Writer) Append(key string, timestamp int64, value []byte) error {
-	if len(key) > MaxKeySize {
-		glog.Fatalf("Tried to Append key larger than max keysize. key: %s", key)
-	}
-	tmpKey, err := orderedcode.Append(s.tmpKey[:0], key, orderedcode.Decr(timestamp))
-	s.tmpKey = tmpKey
-	if err != nil {
-		return err
-	}
-	if err := writeUvarInt64(s.w, uint64(len(tmpKey))); err != nil {
-		return err
-	}
-	if err := writeUvarInt64(s.w, uint64(len(value)+1)); err != nil {
-		return err
-	}
-	if _, err := s.w.Write(tmpKey); err != nil {
-		return err
-	}
-	if value == nil {
-		if err := s.w.WriteByte(typeNil); err != nil {
+	if s.dataBlockB.EstimatedSizeBytes() > blockSize {
+		if err := s.flushBlock(); err != nil {
 			return err
 		}
-	} else {
-		if err := s.w.WriteByte(typeBytes); err != nil {
-			return err
-		}
-		if _, err := s.w.Write(value); err != nil {
-			return err
-		}
+	}
+	s.lastKey = key
+	return s.dataBlockB.Append(key, timestamp, value)
+}
+
+func (s *Writer) flushBlock() error {
+	blockData := s.dataBlockB.Finish()
+
+	bh := blockHandle{s.offset, uint64(len(blockData))}
+	s.indexBlockB.Append(s.lastKey, bh)
+
+	if err := s.writeChecksummedBlock(blockData); err != nil {
+		return err
 	}
 
+	s.dataBlockB.Reset()
 	return nil
 }
 
 // Close finalizes the SST being written.
 func (s *Writer) Close() error {
+	if err := s.flushBlock(); err != nil {
+		return err
+	}
+	indexHandle, err := s.writeIndexBlock()
+	if err != nil {
+		return err
+	}
+	if err := s.writeFooter(indexHandle); err != nil {
+		return err
+	}
 	if err := s.w.Flush(); err != nil {
 		return err
 	}
 	return s.f.Close()
+}
+
+// writeIndexBlock writes the index block and returns a blockHandle pointing to it.
+func (s *Writer) writeIndexBlock() (blockHandle, error) {
+	d := s.indexBlockB.Finish()
+	bh := blockHandle{s.offset, uint64(len(d))}
+	return bh, s.writeChecksummedBlock(d)
+}
+
+func (s *Writer) writeChecksummedBlock(d []byte) error {
+	if _, err := s.w.Write(d); err != nil {
+		return err
+	}
+
+	s.crc.Reset()
+	if _, err := s.crc.Write(d); err != nil {
+		// Technically should not be possible
+		return err
+	}
+	c := s.crc.Sum32()
+	if err := writeUint32(s.w, c); err != nil {
+		return err
+	}
+	s.offset += uint64(len(d)) + 4
+
+	return nil
+}
+
+func (s *Writer) writeFooter(indexHandle blockHandle) error {
+	footer := new(bytes.Buffer)
+	indexHandle.EncodeTo(footer)
+	for footer.Len() < binary.MaxVarintLen64 {
+		footer.WriteByte(0)
+	}
+
+	s.crc.Reset()
+	s.crc.Write(footer.Bytes())
+	c := s.crc.Sum32()
+	writeUint32(footer, c)
+
+	if err := writeUint64(footer, SstMagic); err != nil {
+		return err
+	}
+
+	d := footer.Bytes()
+	if len(d) != footerSize {
+		glog.Fatalf("writerFooter generated footer of wrong length: %v", d)
+	}
+
+	_, err := s.w.Write(d)
+	return err
 }

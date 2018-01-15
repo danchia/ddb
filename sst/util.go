@@ -5,6 +5,15 @@ import (
 	"io"
 )
 
+func writeUint32(w io.Writer, x uint32) error {
+	var b [4]byte
+	binary.LittleEndian.PutUint32(b[:], x)
+	if _, err := w.Write(b[:]); err != nil {
+		return err
+	}
+	return nil
+}
+
 func writeUint64(w io.Writer, x uint64) error {
 	var b [8]byte
 	binary.LittleEndian.PutUint64(b[:], x)

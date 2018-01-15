@@ -1,17 +1,13 @@
 package sst
 
 import (
+	"bytes"
 	"encoding/binary"
-	"errors"
 	"fmt"
+	"hash/crc32"
 	"os"
 
 	"github.com/golang/glog"
-	"github.com/google/orderedcode"
-)
-
-var (
-	ErrNotFound = errors.New("not found")
 )
 
 // Reader is an SSTable reader.
@@ -20,6 +16,8 @@ type Reader struct {
 	f        *os.File
 	fLength  int64
 	filename string
+
+	indexBlockHandle blockHandle
 }
 
 func NewReader(filename string) (*Reader, error) {
@@ -38,8 +36,8 @@ func NewReader(filename string) (*Reader, error) {
 		fLength:  fInfo.Size(),
 		filename: filename,
 	}
-	if ok := r.verifyMagic(0); !ok {
-		return nil, fmt.Errorf("invalid magic at start of file %s", filename)
+	if err := r.readFooter(); err != nil {
+		return nil, fmt.Errorf("error while reading footer: %v", err)
 	}
 	return r, nil
 }
@@ -49,62 +47,81 @@ type Iter struct {
 }
 
 func (r *Reader) Find(key string) (value []byte, ts int64, err error) {
-	// No index, so have to do the a dumb scan.
-	kb := make([]byte, 0, MaxKeySize)
-	offset := int64(8) // skip magic
-
-	for offset < r.fLength {
-		keyLen, n, err := readAtUvarInt64(r.f, offset)
-		if err != nil {
-			return nil, 0, err
-		}
-		offset += n
-
-		valueLen, n, err := readAtUvarInt64(r.f, offset)
-		if err != nil {
-			return nil, 0, err
-		}
-		offset += n
-
-		kb = kb[0:keyLen]
-		if _, err := r.f.ReadAt(kb, offset); err != nil {
-			return nil, 0, err
-		}
-		offset += int64(keyLen)
-
-		eKey := string(kb)
-		var readKey string
-		var ts int64
-		if _, err := orderedcode.Parse(eKey, &readKey, orderedcode.Decr(&ts)); err != nil {
-			return nil, 0, err
-		}
-
-		if readKey == key {
-			value := make([]byte, valueLen)
-			if _, err := r.f.ReadAt(value, offset); err != nil {
-				return nil, 0, err
-			}
-			if value[0] == typeNil {
-				return nil, ts, nil
-			}
-			return value[1:], ts, nil
-		}
-		if readKey > key {
-			return nil, 0, ErrNotFound
-		}
-
-		offset += int64(valueLen)
+	bh, err := r.findDataBlock(key)
+	if err != nil {
+		return nil, 0, err
 	}
-	return nil, 0, ErrNotFound
+	glog.V(4).Infof("reading data block %v", bh)
+	data, err := r.readRawBlock(bh)
+	if err != nil {
+		return nil, 0, err
+	}
+
+	db := newDataBlock(data)
+	return db.Find(key)
 }
 
-// verifyMagic returns true is magic at offset is valid.
-func (r *Reader) verifyMagic(offset int64) bool {
-	var b [8]byte
-	if _, err := r.f.ReadAt(b[:], offset); err != nil {
-		glog.V(2).Infof("File error while verifying magic for %s:%d. %s",
-			r.filename, offset, err)
-		return false
+// findDataBlock finds the first data block containing key.
+// Returns ErrNotFound if key could not be found.
+func (r *Reader) findDataBlock(key string) (blockHandle, error) {
+	var res blockHandle
+
+	glog.V(4).Infof("reading index block %v", r.indexBlockHandle)
+	ibd, err := r.readRawBlock(r.indexBlockHandle)
+	if err != nil {
+		return res, err
 	}
-	return binary.LittleEndian.Uint64(b[:]) == SstMagic
+	ib := newIndexBlock(ibd)
+
+	return ib.Find(key)
+}
+
+func (r *Reader) readRawBlock(h blockHandle) ([]byte, error) {
+	raw := make([]byte, h.size+4)
+	if _, err := r.f.ReadAt(raw, int64(h.offset)); err != nil {
+		return nil, err
+	}
+	bd := raw[:h.size]
+	if !verifyChecksum(bd, raw[h.size:]) {
+		glog.V(2).Infof("sst block corrupt, checksum mismatch. blockHandle: %v", h)
+		return nil, ErrCorruption
+	}
+	return bd, nil
+}
+
+func (r *Reader) readFooter() error {
+	if r.fLength < footerSize {
+		glog.Warningf("sst file is too small to have footer. file: %v", r.filename)
+		return ErrCorruption
+	}
+	footer := make([]byte, footerSize)
+	if _, err := r.f.ReadAt(footer, r.fLength-footerSize); err != nil {
+		return err
+	}
+	if binary.LittleEndian.Uint64(footer[footerSize-8:]) != SstMagic {
+		glog.Warningf("sst footer has invalid magic. file: %v", r.filename)
+		return ErrCorruption
+	}
+
+	if !verifyChecksum(footer[:footerSize-12], footer[footerSize-12:footerSize-8]) {
+		glog.Warningf("sst footer corrupted for %v", r.filename)
+		return ErrCorruption
+	}
+	ibh, err := newBlockHandle(bytes.NewReader(footer))
+	if err != nil {
+		return err
+	}
+	r.indexBlockHandle = ibh
+	return nil
+}
+
+func verifyChecksum(data []byte, sum []byte) bool {
+	crc := crc32.New(crcTable)
+	crc.Write(data)
+	c := crc.Sum32()
+	ec := binary.LittleEndian.Uint32(sum)
+	if ec != c {
+		glog.V(2).Infof("crc got, want: %v %v", c, ec)
+	}
+	return ec == c
 }
