@@ -174,9 +174,13 @@ func (d *Descriptor) Save() error {
 		return err
 	}
 
+	glog.Infof("Wrote new descriptor %v", nextFn)
+
 	// delete old descriptor file, but don't worry about errors
-	if err := os.Remove(curFn); err != nil {
-		glog.Warningf("error removing old descriptor %v: %v", curFn, err)
+	if d.version > 1 {
+		if err := os.Remove(curFn); err != nil {
+			glog.Warningf("error removing old descriptor %v: %v", curFn, err)
+		}
 	}
 
 	return nil
