@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"log"
 	"math/rand"
+	"sync"
+	"time"
 
 	"github.com/danchia/ddb/ddbc/common"
 	pb "github.com/danchia/ddb/proto"
@@ -16,6 +18,7 @@ var (
 	keySize   int
 	valueSize int
 	n         int
+	nWorkers  int
 )
 
 // loaddataCmd represents the loaddata command
@@ -29,20 +32,38 @@ var loaddataCmd = &cobra.Command{
 			log.Fatal(err)
 		}
 
-		keyGen := newKeyGenerator()
+		var wg sync.WaitGroup
+		ch := make(chan *pb.SetRequest, nWorkers)
 
+		for i := 0; i < nWorkers; i++ {
+			go func() {
+				for r := range ch {
+					_, err := c.Set(context.Background(), r)
+					if err != nil {
+						log.Fatal(err)
+					}
+				}
+				wg.Done()
+			}()
+			wg.Add(1)
+		}
+
+		t := time.Now()
+
+		keyGen := newKeyGenerator()
 		for i := 0; i < n; i++ {
 			req := &pb.SetRequest{
 				Key:   keyGen.next(),
 				Value: genValue(),
 			}
-			_, err := c.Set(context.Background(), req)
-			if err != nil {
-				log.Fatal(err)
-			}
+			ch <- req
 		}
 
-		fmt.Printf("Wrote %v entries.", n)
+		close(ch)
+		wg.Wait()
+
+		elapsed := time.Now().Sub(t)
+		fmt.Printf("Wrote %v entries in %v.", n, elapsed)
 	},
 }
 
@@ -77,5 +98,6 @@ func init() {
 
 	loaddataCmd.Flags().IntVar(&keySize, "key_size", 10, "Key length")
 	loaddataCmd.Flags().IntVar(&valueSize, "value_size", 800, "Value length")
+	loaddataCmd.Flags().IntVar(&nWorkers, "num_workers", 20, "Number of load workers")
 	loaddataCmd.Flags().IntVar(&n, "n", 1000, "Number of entries")
 }
