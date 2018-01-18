@@ -2,6 +2,8 @@
 
 ## Overview
 
+This is not an officially supported Google product.
+
 This is code for my learning project *Writing A Distributed Database*. The project is meant to solidify my understanding of distributed databases, and is by no means production ready.
 
 Those looking for production-quality code should probably look to projects like [etcd](https://github.com/coreos/etcd) instead.
