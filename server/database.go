@@ -42,7 +42,8 @@ type database struct {
 
 	logWriter *wal.Writer
 
-	ssts []*sst.Reader
+	blockCache *sst.Cache
+	ssts       []*sst.Reader
 
 	mu sync.Mutex
 }
@@ -66,12 +67,17 @@ func newDatabase(opts Options) *database {
 	}
 	db.descriptor = descriptor
 
+	// Initialize caches
+	if opts.BlockCacheSize > 0 {
+		db.blockCache = sst.NewCache(opts.BlockCacheSize)
+	}
+
 	lastAppliedSeqNo := int64(0)
 	for _, sstMeta := range descriptor.Current.SstMeta {
 		if sstMeta.AppliedUntil > lastAppliedSeqNo {
 			lastAppliedSeqNo = sstMeta.AppliedUntil
 		}
-		sstReader, err := sst.NewReader(filepath.Join(opts.SstDir, sstMeta.Filename))
+		sstReader, err := sst.NewReader(filepath.Join(opts.SstDir, sstMeta.Filename), db.blockCache)
 		if err != nil {
 			glog.Fatalf("Error while opening SST: %v", err)
 		}
@@ -230,7 +236,7 @@ func (d *database) Find(ctx context.Context, key string) ([]byte, error) {
 	valueTs := int64(math.MinInt64)
 
 	for _, s := range ssts {
-		v, ts, err := s.Find(key)
+		v, ts, err := s.Find(ctx, key)
 		if err == sst.ErrNotFound {
 			continue
 		}
@@ -281,7 +287,7 @@ func (d *database) flushIMemtable() {
 	glog.Infof("flush completed for %v", fullFn)
 	// TODO: need to indicate that earlier log entries no longer needed.
 
-	reader, err := sst.NewReader(fullFn)
+	reader, err := sst.NewReader(fullFn, d.blockCache)
 	if err != nil {
 		glog.Fatalf("error opening SST that was just flushed: %v", err)
 	}

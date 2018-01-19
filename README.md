@@ -25,7 +25,7 @@ I will be documenting my thoughts and reflections as I go along on Medium.
  - [ ] SSTable block compression
  - [ ] Bloom filters
  - [ ] Compactions
- - [ ] Block cache
+ - [x] Block cache
 
 ### API
  - [ ] Scans

@@ -15,6 +15,7 @@
 package sst
 
 import (
+	"context"
 	"io/ioutil"
 	"os"
 	"path/filepath"
@@ -133,12 +134,12 @@ func TestFind(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			r, err := NewReader(fname)
+			r, err := NewReader(fname, nil)
 			if err != nil {
 				t.Fatal(err)
 			}
 
-			if gotV, gotTs, err := r.Find(tt.findKey); err != tt.wantErr || gotTs != tt.wantTs || !cmp.Equal(gotV, tt.wantV) {
+			if gotV, gotTs, err := r.Find(context.Background(), tt.findKey); err != tt.wantErr || gotTs != tt.wantTs || !cmp.Equal(gotV, tt.wantV) {
 				t.Errorf("Find(%v)=%v,%v,%v want %v,%v,%v", tt.findKey, gotV, gotTs, err, tt.wantV, tt.wantTs, tt.wantErr)
 			}
 		})

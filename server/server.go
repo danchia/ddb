@@ -40,6 +40,9 @@ type Options struct {
 	LogDir        string
 	TargetLogSize int64
 
+	// BlockCacheSize is the size of the block cache. 0 disables the cache.
+	BlockCacheSize int64
+
 	DescriptorDir string
 }
 
@@ -50,6 +53,8 @@ func DefaultOptions(baseDir string) Options {
 
 		LogDir:        filepath.Join(baseDir, "log"),
 		TargetLogSize: 8 * 1024 * 1024,
+
+		BlockCacheSize: 10 * 1024 * 1024,
 
 		DescriptorDir: baseDir,
 	}

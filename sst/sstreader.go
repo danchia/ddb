@@ -16,6 +16,7 @@ package sst
 
 import (
 	"bytes"
+	"context"
 	"encoding/binary"
 	"fmt"
 	"hash/crc32"
@@ -32,9 +33,12 @@ type Reader struct {
 	filename string
 
 	indexBlockHandle blockHandle
+
+	cache   *Cache
+	cacheID uint64
 }
 
-func NewReader(filename string) (*Reader, error) {
+func NewReader(filename string, cache *Cache) (*Reader, error) {
 	f, err := os.Open(filename)
 	if err != nil {
 		return nil, err
@@ -49,9 +53,13 @@ func NewReader(filename string) (*Reader, error) {
 		f:        f,
 		fLength:  fInfo.Size(),
 		filename: filename,
+		cache:    cache,
 	}
 	if err := r.readFooter(); err != nil {
 		return nil, fmt.Errorf("error while reading footer: %v", err)
+	}
+	if cache != nil {
+		r.cacheID = cache.NewID()
 	}
 	return r, nil
 }
@@ -60,7 +68,7 @@ type Iter struct {
 	r *Reader
 }
 
-func (r *Reader) Find(key string) (value []byte, ts int64, err error) {
+func (r *Reader) Find(ctx context.Context, key string) (value []byte, ts int64, err error) {
 	bh, err := r.findDataBlock(key)
 	if err != nil {
 		return nil, 0, err
@@ -91,6 +99,21 @@ func (r *Reader) findDataBlock(key string) (blockHandle, error) {
 }
 
 func (r *Reader) readRawBlock(h blockHandle) ([]byte, error) {
+	glog.V(4).Infof("reading raw block: %v", h)
+
+	var cacheKey string
+	if r.cache != nil {
+		var kb [16]byte
+		binary.LittleEndian.PutUint64(kb[:8], r.cacheID)
+		binary.LittleEndian.PutUint64(kb[8:], uint64(h.offset))
+		cacheKey = string(kb[:])
+
+		if data := r.cache.Get(cacheKey); data != nil {
+			glog.V(4).Infof("cache hit for %v", h)
+			return data, nil
+		}
+	}
+
 	raw := make([]byte, h.size+4)
 	if _, err := r.f.ReadAt(raw, int64(h.offset)); err != nil {
 		return nil, err
@@ -99,6 +122,10 @@ func (r *Reader) readRawBlock(h blockHandle) ([]byte, error) {
 	if !verifyChecksum(bd, raw[h.size:]) {
 		glog.V(2).Infof("sst block corrupt, checksum mismatch. blockHandle: %v", h)
 		return nil, ErrCorruption
+	}
+
+	if r.cache != nil {
+		r.cache.Insert(cacheKey, bd)
 	}
 	return bd, nil
 }
