@@ -16,9 +16,12 @@ package sst
 
 import (
 	"context"
+	"fmt"
 	"io/ioutil"
+	"math/rand"
 	"os"
 	"path/filepath"
+	"sort"
 	"testing"
 
 	"github.com/google/go-cmp/cmp"
@@ -67,7 +70,7 @@ func TestFind(t *testing.T) {
 			"Five entry SST, found start.",
 			[]kv{
 				kv{"a", 1, []byte("1")},
-				kv{"b", 1, []byte("2")},
+				kv{"aa", 1, []byte("2")},
 				kv{"c", 1, []byte("3")},
 				kv{"d", 1, []byte("4")},
 				kv{"e", 1, []byte("5")},
@@ -78,14 +81,14 @@ func TestFind(t *testing.T) {
 		{
 			"Five entry SST, found.",
 			[]kv{
-				kv{"a", 1, []byte("1")},
-				kv{"b", 10, []byte("2")},
-				kv{"b", 1, []byte("3")},
-				kv{"d", 1, []byte("4")},
+				kv{"abaa", 1, []byte("1")},
+				kv{"abbb", 10, []byte("2")},
+				kv{"abbbd", 1, []byte("3")},
+				kv{"abc", 1, []byte("4")},
 				kv{"e", 1, []byte("5")},
 			},
-			"b",
-			[]byte("2"), 10, nil,
+			"abbbd",
+			[]byte("3"), 1, nil,
 		},
 		{
 			"Five entry SST, found end.",
@@ -140,8 +143,61 @@ func TestFind(t *testing.T) {
 			}
 
 			if gotV, gotTs, err := r.Find(context.Background(), tt.findKey); err != tt.wantErr || gotTs != tt.wantTs || !cmp.Equal(gotV, tt.wantV) {
-				t.Errorf("Find(%v)=%v,%v,%v want %v,%v,%v", tt.findKey, gotV, gotTs, err, tt.wantV, tt.wantTs, tt.wantErr)
+				t.Errorf("Find(%v)=%#v,%v,%v want %#v,%v,%v", tt.findKey, gotV, gotTs, err, tt.wantV, tt.wantTs, tt.wantErr)
 			}
 		})
+	}
+}
+
+func TestRandomData(t *testing.T) {
+	dir, err := ioutil.TempDir("", "ssttest")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(dir)
+	fname := filepath.Join(dir, "1.sst")
+
+	type tsValue struct {
+		ts    int64
+		value []byte
+	}
+	data := make(map[string]tsValue)
+
+	w, err := NewWriter(fname)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 8000; i++ {
+		r := rand.Int()
+		key := fmt.Sprintf("%09d", r)
+		tsV := tsValue{int64(i), []byte(key)}
+		data[key] = tsV
+	}
+
+	keys := make([]string, 0, len(data))
+	for key := range data {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+
+	for _, key := range keys {
+		tsV := data[key]
+		if err := w.Append(key, tsV.ts, tsV.value); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	r, err := NewReader(fname, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for key, tsV := range data {
+		if gotV, gotTs, err := r.Find(context.Background(), key); err != nil || gotTs != tsV.ts || !cmp.Equal(gotV, tsV.value) {
+			t.Errorf("Find(%v)=%#v,%v,%v want %#v,%v,%v", key, gotV, gotTs, err, tsV.value, tsV.ts, nil)
+		}
 	}
 }

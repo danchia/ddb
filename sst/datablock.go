@@ -23,7 +23,8 @@ import (
 )
 
 type dataBlockBuilder struct {
-	buf *bytes.Buffer
+	buf           *bytes.Buffer
+	prefixEncoder *prefixEncoder
 
 	// scratch space for key encoding
 	tmpKey []byte
@@ -31,7 +32,8 @@ type dataBlockBuilder struct {
 
 func newDataBlockBuilder() *dataBlockBuilder {
 	return &dataBlockBuilder{
-		buf: new(bytes.Buffer),
+		buf:           new(bytes.Buffer),
+		prefixEncoder: newPrefixEncoder(16),
 	}
 }
 
@@ -42,13 +44,10 @@ func (b *dataBlockBuilder) Append(key string, timestamp int64, value []byte) err
 	if err != nil {
 		return err
 	}
-	if err := writeUvarInt64(b.buf, uint64(len(tmpKey))); err != nil {
+	if err := b.prefixEncoder.EncodeInto(b.buf, tmpKey, uint32(b.buf.Len())); err != nil {
 		return err
 	}
 	if err := writeUvarInt64(b.buf, uint64(len(value)+1)); err != nil {
-		return err
-	}
-	if _, err := b.buf.Write(tmpKey); err != nil {
 		return err
 	}
 	if value == nil {
@@ -68,52 +67,91 @@ func (b *dataBlockBuilder) Append(key string, timestamp int64, value []byte) err
 
 // EstimatedSizeBytes returns the estimated current size of the block.
 func (b *dataBlockBuilder) EstimatedSizeBytes() int64 {
-	return int64(b.buf.Len())
+	return int64(b.buf.Len()) + int64(len(b.prefixEncoder.Restarts()))*4 + 4
 }
 
 // Finish finishes building the block and returns a slice to its contents.
 // Returned slice is valid until Reset() is called.
-func (b *dataBlockBuilder) Finish() []byte {
-	return b.buf.Bytes()
+func (b *dataBlockBuilder) Finish() ([]byte, error) {
+	if err := b.prefixEncoder.WriteRestarts(b.buf); err != nil {
+		return nil, err
+	}
+	return b.buf.Bytes(), nil
 }
 
 // Reset resets the block.
 // However, scratch memory may be retained.
 func (b *dataBlockBuilder) Reset() {
 	b.buf.Reset()
+	b.prefixEncoder.Reset()
 }
 
 type dataBlock struct {
-	r *bytes.Reader
+	r        *bytes.Reader
+	restarts []int
 }
 
 func newDataBlock(d []byte) *dataBlock {
-	return &dataBlock{r: bytes.NewReader(d)}
+	nRestarts := int(binary.LittleEndian.Uint32(d[len(d)-4:]))
+	restarts := make([]int, 0, nRestarts)
+	restartOffset := len(d) - 4 - 4*nRestarts
+	for o := restartOffset; o < len(d)-4; o += 4 {
+		restarts = append(restarts, int(binary.LittleEndian.Uint32(d[o:o+4])))
+	}
+
+	return &dataBlock{
+		r:        bytes.NewReader(d[:restartOffset]),
+		restarts: restarts,
+	}
 }
 
 func (b *dataBlock) Find(key string) (value []byte, ts int64, err error) {
-	kb := make([]byte, 0, MaxKeySize)
-	for {
-		eKeyLen, err := binary.ReadUvarint(b.r)
+	kb := make([]byte, 0, MaxSstKeySize)
+	i, j := 0, len(b.restarts)-1
+	for i < j {
+		// when there 2 elements, pick the right one
+		h := int(uint(i+j+1) >> 1)
+		if _, err := b.r.Seek(int64(b.restarts[h]), io.SeekStart); err != nil {
+			return nil, 0, err
+		}
+		eKey, err := prefixDecodeFrom(b.r, nil, kb)
 		if err != nil {
-			if err == io.EOF {
-				return nil, 0, ErrNotFound
-			}
+			return nil, 0, err
+		}
+		readKey, _, err := parseEKey(string(eKey))
+		if err != nil {
+			return nil, 0, err
+		}
+		if readKey < key {
+			// key_h is < key, so everything before not relevant.
+			i = h
+		} else {
+			// key_h is >= key, so it and every after is not relevant.
+			j = h - 1
+		}
+	}
+
+	// at this point, either key_i < key
+	// or i == 0 and key_i has unknown relation to key.
+
+	if _, err := b.r.Seek(int64(b.restarts[i]), io.SeekStart); err != nil {
+		return nil, 0, err
+	}
+
+	var lastKey []byte
+	for b.r.Len() > 0 {
+		eKey, err := prefixDecodeFrom(b.r, lastKey, kb)
+		if err != nil {
+			return nil, 0, err
+		}
+		lastKey = eKey
+
+		readKey, ts, err := parseEKey(string(eKey))
+		if err != nil {
 			return nil, 0, err
 		}
 		valueLen, err := binary.ReadUvarint(b.r)
 		if err != nil {
-			return nil, 0, err
-		}
-
-		kb = kb[:eKeyLen]
-		if _, err = io.ReadFull(b.r, kb); err != nil {
-			return nil, 0, err
-		}
-		eKey := string(kb)
-		var readKey string
-		var ts int64
-		if _, err = orderedcode.Parse(eKey, &readKey, orderedcode.Decr(&ts)); err != nil {
 			return nil, 0, err
 		}
 
@@ -135,4 +173,13 @@ func (b *dataBlock) Find(key string) (value []byte, ts int64, err error) {
 			return nil, 0, err
 		}
 	}
+	return nil, 0, ErrNotFound
+}
+
+func parseEKey(eKey string) (key string, ts int64, err error) {
+	var readKey string
+	if _, err = orderedcode.Parse(string(eKey), &readKey, orderedcode.Decr(&ts)); err != nil {
+		return "", 0, err
+	}
+	return readKey, ts, nil
 }

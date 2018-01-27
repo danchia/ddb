@@ -20,29 +20,29 @@ import (
 	"io"
 )
 
+// TODO: there's a lot of duplication with datablock. Worth trying to merge?
 type indexBlockBuilder struct {
-	buf *bytes.Buffer
+	buf           *bytes.Buffer
+	prefixEncoder *prefixEncoder
 
 	bhBuffer *bytes.Buffer
 }
 
 func newIndexBlockBuilder() *indexBlockBuilder {
 	return &indexBlockBuilder{
-		buf:      new(bytes.Buffer),
-		bhBuffer: new(bytes.Buffer),
+		buf:           new(bytes.Buffer),
+		bhBuffer:      new(bytes.Buffer),
+		prefixEncoder: newPrefixEncoder(16),
 	}
 }
 
 func (b *indexBlockBuilder) Append(key string, bh blockHandle) error {
 	b.bhBuffer.Reset()
 	bh.EncodeTo(b.bhBuffer)
-	if err := writeUvarInt64(b.buf, uint64(len(key))); err != nil {
+	if err := b.prefixEncoder.EncodeInto(b.buf, []byte(key), uint32(b.buf.Len())); err != nil {
 		return err
 	}
 	if err := writeUvarInt64(b.buf, uint64(b.bhBuffer.Len())); err != nil {
-		return err
-	}
-	if _, err := b.buf.WriteString(key); err != nil {
 		return err
 	}
 	if _, err := b.buf.Write(b.bhBuffer.Bytes()); err != nil {
@@ -52,45 +52,74 @@ func (b *indexBlockBuilder) Append(key string, bh blockHandle) error {
 	return nil
 }
 
-func (b *indexBlockBuilder) Finish() []byte {
-	return b.buf.Bytes()
+func (b *indexBlockBuilder) Finish() ([]byte, error) {
+	if err := b.prefixEncoder.WriteRestarts(b.buf); err != nil {
+		return nil, err
+	}
+	return b.buf.Bytes(), nil
 }
 
 type indexBlock struct {
-	r *bytes.Reader
+	r        *bytes.Reader
+	restarts []int
 }
 
 func newIndexBlock(d []byte) *indexBlock {
+	nRestarts := int(binary.LittleEndian.Uint32(d[len(d)-4:]))
+	restarts := make([]int, 0, nRestarts)
+	restartOffset := len(d) - 4 - 4*nRestarts
+	for o := restartOffset; o < len(d)-4; o += 4 {
+		restarts = append(restarts, int(binary.LittleEndian.Uint32(d[o:o+4])))
+	}
+
 	return &indexBlock{
-		r: bytes.NewReader(d),
+		r:        bytes.NewReader(d[:restartOffset]),
+		restarts: restarts,
 	}
 }
 
 func (b *indexBlock) Find(key string) (blockHandle, error) {
-	var h blockHandle
-	kb := make([]byte, 0, MaxKeySize)
-	for {
-		keyLen, err := binary.ReadUvarint(b.r)
+	var bh blockHandle
+	kb := make([]byte, 0, MaxSstKeySize)
+	i, j := 0, len(b.restarts)-1
+	for i < j {
+		// lean right when there's two elements
+		h := int(uint(i+j+1) >> 1)
+		if _, err := b.r.Seek(int64(b.restarts[h]), io.SeekStart); err != nil {
+			return bh, err
+		}
+		eKey, err := prefixDecodeFrom(b.r, nil, kb)
 		if err != nil {
-			if err == io.EOF {
-				return h, ErrNotFound
-			}
-			return h, err
+			return bh, err
 		}
-		valueLen, err := binary.ReadUvarint(b.r)
-		if err != nil {
-			return h, err
-		}
-		kb = kb[:keyLen]
-		if _, err = io.ReadFull(b.r, kb); err != nil {
-			return h, err
-		}
-		if key <= string(kb) {
-			h, err = newBlockHandle(b.r)
-			return h, err
-		}
-		if _, err = b.r.Seek(int64(valueLen), io.SeekCurrent); err != nil {
-			return h, err
+		readKey := string(eKey)
+		if readKey < key {
+			i = h
+		} else {
+			j = h - 1
 		}
 	}
+
+	if _, err := b.r.Seek(int64(b.restarts[i]), io.SeekStart); err != nil {
+		return bh, err
+	}
+
+	var lastKey []byte
+	for b.r.Len() > 0 {
+		eKey, err := prefixDecodeFrom(b.r, lastKey, kb)
+		lastKey = eKey
+		readKey := string(eKey)
+		valueLen, err := binary.ReadUvarint(b.r)
+		if err != nil {
+			return bh, err
+		}
+		if key <= readKey {
+			bh, err = newBlockHandle(b.r)
+			return bh, err
+		}
+		if _, err = b.r.Seek(int64(valueLen), io.SeekCurrent); err != nil {
+			return bh, err
+		}
+	}
+	return bh, ErrNotFound
 }

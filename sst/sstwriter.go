@@ -66,7 +66,10 @@ func (s *Writer) Append(key string, timestamp int64, value []byte) error {
 }
 
 func (s *Writer) flushBlock() error {
-	blockData := s.dataBlockB.Finish()
+	blockData, err := s.dataBlockB.Finish()
+	if err != nil {
+		return err
+	}
 
 	bh := blockHandle{s.offset, uint64(len(blockData))}
 	s.indexBlockB.Append(s.lastKey, bh)
@@ -99,7 +102,10 @@ func (s *Writer) Close() error {
 
 // writeIndexBlock writes the index block and returns a blockHandle pointing to it.
 func (s *Writer) writeIndexBlock() (blockHandle, error) {
-	d := s.indexBlockB.Finish()
+	d, err := s.indexBlockB.Finish()
+	if err != nil {
+		return blockHandle{}, err
+	}
 	bh := blockHandle{s.offset, uint64(len(d))}
 	return bh, s.writeChecksummedBlock(d)
 }

@@ -22,8 +22,10 @@ import (
 )
 
 const (
-	SstMagic   = uint64(0xe489f8a9d479536b)
-	MaxKeySize = 8 * 1024
+	SstMagic = uint64(0xe489f8a9d479536b)
+	// MaxSstKeySize is the max encoded keysize in an SST.
+	// Slightly larger than DB MaxKeySize due to additional data.
+	MaxSstKeySize = 8*1024 + 16
 
 	footerSize = binary.MaxVarintLen64 + 4 + 8
 )
