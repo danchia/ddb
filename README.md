@@ -21,7 +21,7 @@ I will be documenting my thoughts and reflections as I go along on Medium.
 ### Storage Engine
  - [x] WAL rotation / truncation
  - [x] SSTable indexes
- - [ ] SSTable key compression
+ - [x] SSTable key compression
  - [ ] SSTable block compression
  - [ ] Bloom filters
  - [ ] Compactions
