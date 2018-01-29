@@ -65,6 +65,40 @@ func benchmark(b *testing.B, dataSize, batchSize int) {
 			w.Sync()
 		}
 	}
+}
+
+func BenchmarkConcurrentAppend(b *testing.B) {
+	dir, err := ioutil.TempDir("", "waltest")
+	if err != nil {
+		b.Fatal(err)
+	}
+	defer os.RemoveAll(dir)
+
+	l := &pb.LogRecord{
+		Mutation: &pb.Mutation{
+			Key:   strings.Repeat("a", 100),
+			Value: []byte{},
+			Type:  pb.Mutation_PUT,
+		},
+	}
+	b.SetBytes(int64(proto.Size(l)))
+
+	opts := Options{Dirname: dir, TargetSize: 128 * 1024 * 1024}
+	w, err := NewWriter(0, opts)
+	if err != nil {
+		b.Fatal(err)
+	}
+	defer w.Close()
+
+	b.ResetTimer()
+
+	b.RunParallel(func(tpb *testing.PB) {
+		for tpb.Next() {
+			w.Append(l)
+			w.Sync()
+		}
+	})
 
 	b.StopTimer()
+
 }
