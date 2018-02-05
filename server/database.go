@@ -161,9 +161,6 @@ func (d *database) Set(ctx context.Context, req *pb.SetRequest) (*pb.SetResponse
 		return nil, err
 	}
 
-	d.mu.Lock()
-	defer d.mu.Unlock()
-
 	// TODO: this needs to be monotonically increasing. hybrid logical clocks?
 	ts := time.Now().UnixNano() / 1000
 
@@ -176,19 +173,28 @@ func (d *database) Set(ctx context.Context, req *pb.SetRequest) (*pb.SetResponse
 		},
 	}
 
+	ch := make(chan error, 1)
+
 	trace.Print(ctx, "appending to log")
-	if err := d.logWriter.Append(l); err != nil {
+	d.logWriter.Append(l, func(err error) {
+		trace.Print(ctx, "append log done")
+		if err != nil {
+			ch <- err
+			return
+		}
+
+		d.mu.Lock()
+		d.apply(l)
+		d.maybeTriggerFlush()
+		d.mu.Unlock()
+
+		ch <- nil
+	})
+
+	err := <-ch
+	if err != nil {
 		return nil, err
 	}
-	trace.Print(ctx, "syncing log")
-	if err := d.logWriter.Sync(); err != nil {
-		return nil, err
-	}
-	trace.Print(ctx, "sync log done")
-
-	d.apply(l)
-	d.maybeTriggerFlush()
-
 	return &pb.SetResponse{Timestamp: ts}, nil
 }
 

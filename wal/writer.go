@@ -40,15 +40,20 @@ var (
 // Writer writes log entries to the write ahead log.
 // Thread-safe.
 type Writer struct {
+	nextSeq  int64
+	buf      *proto.Buffer
+	crc      hash.Hash32
+	filename string
+	size     int64
+	opts     Options
+	mu       sync.Mutex
+
 	f         *os.File
 	bufWriter *bufio.Writer
-	mu        sync.Mutex
-	buf       *proto.Buffer
-	crc       hash.Hash32
-	nextSeq   int64
-	opts      Options
-	filename  string
-	size      int64
+	recordCh  chan rawRecord
+
+	closeCh       chan struct{}
+	closeResultCh chan error
 }
 
 type Options struct {
@@ -57,26 +62,85 @@ type Options struct {
 }
 
 func NewWriter(nextSeq int64, opts Options) (*Writer, error) {
-	wal := &Writer{
-		buf:     proto.NewBuffer(nil),
-		crc:     crc32.New(crcTable),
-		nextSeq: nextSeq,
-		opts:    opts,
+	writer := &Writer{
+		buf:           proto.NewBuffer(nil),
+		crc:           crc32.New(crcTable),
+		nextSeq:       nextSeq,
+		opts:          opts,
+		recordCh:      make(chan rawRecord, 1000),
+		closeCh:       make(chan struct{}),
+		closeResultCh: make(chan error),
 	}
-
-	if err := wal.rollover(); err != nil {
+	if err := writer.rollover(nextSeq); err != nil {
 		return nil, err
 	}
+	go writer.writeLoop()
+	return writer, nil
+}
 
-	return wal, nil
+type rawRecord struct {
+	seq      int64
+	data     []byte
+	checkSum uint32
+	cb       func(error)
+}
+
+// Append appends a log record to the WAL. The log record is modified with the log sequence number.
+// cb is invoked serially, in log sequence number order.
+func (w *Writer) Append(l *pb.LogRecord, cb func(error)) {
+	glog.V(2).Infof("wal.Append %v", l)
+
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	r, err := w.formRecord(l)
+	if err != nil {
+		cb(err)
+	}
+	r.cb = cb
+
+	w.recordCh <- r
+}
+
+func (w *Writer) formRecord(l *pb.LogRecord) (rawRecord, error) {
+	l.Sequence = w.nextSeq
+	w.nextSeq++
+
+	w.buf.Reset()
+	err := w.buf.Marshal(l)
+	if err != nil {
+		return rawRecord{}, err
+	}
+	data := w.buf.Bytes()
+	dataLen := len(data)
+	if uint32(dataLen) > MaxRecordBytes {
+		return rawRecord{}, fmt.Errorf("log record has encoded size %d that exceeds %d", dataLen, MaxRecordBytes)
+	}
+
+	w.crc.Reset()
+	if _, err := w.crc.Write(data); err != nil {
+		return rawRecord{}, err
+	}
+	c := w.crc.Sum32()
+
+	dataCopy := make([]byte, dataLen)
+	copy(dataCopy, data)
+
+	r := rawRecord{
+		seq:      l.Sequence,
+		data:     dataCopy,
+		checkSum: c,
+	}
+
+	return r, nil
 }
 
 func logName(nextSeq int64, o Options) string {
 	return fmt.Sprintf("%s%cwal-%d.log", o.Dirname, os.PathSeparator, nextSeq)
 }
 
-func (w *Writer) rollover() error {
-	fn := logName(w.nextSeq, w.opts)
+func (w *Writer) rollover(seq int64) error {
+	fn := logName(seq, w.opts)
 
 	glog.Infof("Rolling over WAL from %v to %v.", w.filename, fn)
 
@@ -104,60 +168,82 @@ func (w *Writer) rollover() error {
 	return nil
 }
 
-// Append appends a log record to the WAL. The log record is modified with the log sequence number.
-func (w *Writer) Append(l *pb.LogRecord) error {
-	w.mu.Lock()
-	defer w.mu.Unlock()
+func (w *Writer) writeLoop() {
+	// TODO: error handling
+	callbacks := make([]func(error), 0)
+Main:
+	for {
+		callbacks = callbacks[:0]
+		// wait for first record
+		select {
+		case r := <-w.recordCh:
+			if err := w.writeRawRecord(r); err != nil {
+				r.cb(err)
+			} else {
+				callbacks = append(callbacks, r.cb)
+			}
+		case <-w.closeCh:
+			break Main
+		}
+
+		// write out all remaining records
+	L:
+		for {
+			select {
+			case r := <-w.recordCh:
+				if err := w.writeRawRecord(r); err != nil {
+					r.cb(err)
+				} else {
+					callbacks = append(callbacks, r.cb)
+				}
+			default:
+				break L
+			}
+		}
+
+		// sync, then notify.
+		glog.V(4).Infof("Notifying %v callbacks", len(callbacks))
+		err := w.sync()
+		for _, cb := range callbacks {
+			cb(err)
+		}
+	}
+
+	glog.V(2).Info("wal.writeLoop shutting down")
+
+	if err := w.bufWriter.Flush(); err != nil {
+		w.closeResultCh <- err
+	}
+	w.closeResultCh <- w.f.Close()
+}
+
+func (w *Writer) writeRawRecord(r rawRecord) error {
+	glog.V(4).Infof("wal writing raw record for seq %v", r.seq)
 
 	if w.size > w.opts.TargetSize {
-		if err := w.rollover(); err != nil {
+		if err := w.rollover(r.seq); err != nil {
 			glog.Warningf("Error while attempting to rollover WAL: %v", err)
 			return err
 		}
 	}
 
-	l.Sequence = w.nextSeq
-	w.nextSeq++
-
-	w.buf.Reset()
-	err := w.buf.Marshal(l)
-	if err != nil {
-		return err
-	}
-	data := w.buf.Bytes()
-	dataLen := len(data)
-	if uint32(dataLen) > MaxRecordBytes {
-		return fmt.Errorf("log record has encoded size %d that exceeds %d", dataLen, MaxRecordBytes)
-	}
-
-	w.crc.Reset()
-	if _, err := w.crc.Write(data); err != nil {
-		return err
-	}
-	c := w.crc.Sum32()
-
 	var scratch [8]byte
-	binary.LittleEndian.PutUint32(scratch[0:4], uint32(dataLen))
-	binary.LittleEndian.PutUint32(scratch[4:8], c)
+	binary.LittleEndian.PutUint32(scratch[0:4], uint32(len(r.data)))
+	binary.LittleEndian.PutUint32(scratch[4:8], r.checkSum)
 
-	_, err = w.bufWriter.Write(scratch[:])
-	if err != nil {
+	if _, err := w.bufWriter.Write(scratch[:]); err != nil {
 		return err
 	}
-	w.size += int64(dataLen) + 8
+	w.size += int64(len(r.data)) + 8
 
-	_, err = w.bufWriter.Write(data)
-	if err != nil {
+	if _, err := w.bufWriter.Write(r.data); err != nil {
 		return err
 	}
 
 	return nil
 }
 
-func (w *Writer) Sync() error {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-
+func (w *Writer) sync() error {
 	if err := w.bufWriter.Flush(); err != nil {
 		return err
 	}
@@ -165,9 +251,6 @@ func (w *Writer) Sync() error {
 }
 
 func (w *Writer) Close() error {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-
-	w.bufWriter.Flush()
-	return w.f.Close()
+	w.closeCh <- struct{}{}
+	return <-w.closeResultCh
 }

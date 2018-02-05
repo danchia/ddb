@@ -17,10 +17,12 @@ package wal
 import (
 	"io/ioutil"
 	"os"
+	"sync"
 	"testing"
 
 	pb "github.com/danchia/ddb/proto"
 	"github.com/golang/protobuf/proto"
+	"github.com/google/go-cmp/cmp"
 )
 
 func TestReadWrite(t *testing.T) {
@@ -43,15 +45,12 @@ func TestReadWrite(t *testing.T) {
 		&pb.LogRecord{Mutation: &pb.Mutation{Key: "b"}},
 	}
 	for i, r := range expectedRecords {
-		if err = w.Append(r); err != nil {
+		if err = appendSync(w, r); err != nil {
 			t.Fatal(err)
 		}
 		if r.Sequence != int64(i+1) {
 			t.Errorf("r.Sequence = %v, want %v", r.Sequence, i+1)
 		}
-	}
-	if err = w.Sync(); err != nil {
-		t.Fatal(err)
 	}
 	if err = w.Close(); err != nil {
 		t.Fatal(err)
@@ -77,4 +76,55 @@ func TestReadWrite(t *testing.T) {
 			t.Errorf("TestReadWrite read %v, wanted %v.", actual, e)
 		}
 	}
+}
+
+func TestConcWriteCallbackInOrder(t *testing.T) {
+	dir, err := ioutil.TempDir("", "waltest")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(dir)
+	opts := Options{
+		Dirname:    dir,
+		TargetSize: 5000,
+	}
+
+	w, err := NewWriter(1, opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var wg sync.WaitGroup
+	iters := 10000
+	sequence := make([]int64, 0)
+	expected := make([]int64, iters)
+
+	wg.Add(iters)
+
+	for i := 0; i < iters; i++ {
+		expected[i] = int64(i + 1)
+		l := &pb.LogRecord{Mutation: &pb.Mutation{Key: "a"}}
+		go func() {
+			w.Append(l, func(err error) {
+				sequence = append(sequence, l.Sequence)
+				wg.Done()
+			})
+		}()
+	}
+	wg.Wait()
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	if diff := cmp.Diff(sequence, expected); diff != "" {
+		t.Errorf("Callbacks not in order/complete (-got +want)\n%v", diff)
+	}
+}
+
+func appendSync(w *Writer, l *pb.LogRecord) error {
+	c := make(chan error)
+	w.Append(l, func(err error) {
+		c <- err
+	})
+	return <-c
 }

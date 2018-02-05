@@ -24,49 +24,6 @@ import (
 	"github.com/golang/protobuf/proto"
 )
 
-func BenchmarkAppend100NoSync(b *testing.B)   { benchmark(b, 100, 0) }
-func BenchmarkAppend100NoBatch(b *testing.B)  { benchmark(b, 100, 1) }
-func BenchmarkAppend100Batch10(b *testing.B)  { benchmark(b, 100, 10) }
-func BenchmarkAppend100Batch100(b *testing.B) { benchmark(b, 100, 100) }
-
-func BenchmarkAppend1000NoSync(b *testing.B)   { benchmark(b, 1000, 0) }
-func BenchmarkAppend1000NoBatch(b *testing.B)  { benchmark(b, 1000, 1) }
-func BenchmarkAppend1000Batch10(b *testing.B)  { benchmark(b, 1000, 10) }
-func BenchmarkAppend1000Batch100(b *testing.B) { benchmark(b, 1000, 100) }
-
-func benchmark(b *testing.B, dataSize, batchSize int) {
-	dir, err := ioutil.TempDir("", "waltest")
-	if err != nil {
-		b.Fatal(err)
-	}
-	defer os.RemoveAll(dir)
-
-	l := &pb.LogRecord{
-		Mutation: &pb.Mutation{
-			Key:   strings.Repeat("a", dataSize),
-			Value: []byte{},
-			Type:  pb.Mutation_PUT,
-		},
-	}
-	b.SetBytes(int64(proto.Size(l)))
-
-	opts := Options{Dirname: dir, TargetSize: 128 * 1024 * 1024}
-	w, err := NewWriter(0, opts)
-	if err != nil {
-		b.Fatal(err)
-	}
-	defer w.Close()
-
-	b.ResetTimer()
-
-	for i := 0; i < b.N; i++ {
-		w.Append(l)
-		if batchSize > 0 && i%batchSize == 0 {
-			w.Sync()
-		}
-	}
-}
-
 func BenchmarkConcurrentAppend(b *testing.B) {
 	dir, err := ioutil.TempDir("", "waltest")
 	if err != nil {
@@ -94,8 +51,9 @@ func BenchmarkConcurrentAppend(b *testing.B) {
 
 	b.RunParallel(func(tpb *testing.PB) {
 		for tpb.Next() {
-			w.Append(l)
-			w.Sync()
+			c := make(chan error)
+			w.Append(l, func(err error) { c <- err })
+			<-c
 		}
 	})
 
