@@ -43,11 +43,11 @@ It is common to want to capture all the activity of a function call in a span. F
 this to work, the function must take a context.Context as a parameter. Add these two
 lines to the top of the function:
 
-    ctx = trace.StartSpan(ctx, "your choice of name")
-    defer trace.EndSpan(ctx)
+    ctx, span := trace.StartSpan(ctx, "your choice of name")
+    defer span.End()
 
-StartSpan will create a child span if one already exists, and will create a
-new top-level span otherwise.
+StartSpan will create a new top-level span if the context
+doesn't contain another span, otherwise it will create a child span.
 
 As a suggestion, use the fully-qualified function name as the span name, e.g.
 "github.com/me/mypackage.Run".

@@ -24,6 +24,7 @@ import (
 	"github.com/danchia/ddb/server"
 	"github.com/golang/glog"
 	ocgrpc "go.opencensus.io/plugin/grpc"
+	"go.opencensus.io/zpages"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/reflection"
 )
@@ -57,7 +58,7 @@ func main() {
 }
 
 func startDebugServer() {
-	http.HandleFunc("/requests", server.Traces)
+	zpages.AddDefaultHTTPHandlers()
 	if err := http.ListenAndServe(fmt.Sprintf(":%d", *debugPort), nil); err != nil {
 		glog.Fatalf("Failed to serve debug: %v", err)
 	}

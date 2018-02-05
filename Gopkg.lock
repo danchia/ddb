@@ -52,8 +52,8 @@
 [[projects]]
   name = "go.opencensus.io"
   packages = ["internal/tagencoding","plugin/grpc","plugin/grpc/grpcstats","plugin/grpc/grpctrace","stats","tag","trace","trace/propagation"]
-  revision = "22f2851c619f086d3cc2845c4ec1873aea3e24e4"
-  version = "v0.1.0"
+  revision = "7e6c5d736280267bc85cfd63b23507c4889ef82e"
+  version = "v0.2.0"
 
 [[projects]]
   branch = "master"
@@ -82,6 +82,6 @@
 [solve-meta]
   analyzer-name = "dep"
   analyzer-version = 1
-  inputs-digest = "7714aa9795ec72f7d22596188d2d9d71afd1c53e83f43e8a767da1464d4a5a18"
+  inputs-digest = "12266550df7360b3045319e77080ae916e98f1773bc247e88c946e5b6f63b18e"
   solver-name = "gps-cdcl"
   solver-version = 1

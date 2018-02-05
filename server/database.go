@@ -175,9 +175,9 @@ func (d *database) Set(ctx context.Context, req *pb.SetRequest) (*pb.SetResponse
 
 	ch := make(chan error, 1)
 
-	trace.Print(ctx, "appending to log")
+	trace.FromContext(ctx).Annotate(nil, "appending to log")
 	d.logWriter.Append(l, func(err error) {
-		trace.Print(ctx, "append log done")
+		trace.FromContext(ctx).Annotate(nil, "appending log done")
 		if err != nil {
 			ch <- err
 			return

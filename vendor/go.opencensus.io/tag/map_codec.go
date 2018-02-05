@@ -127,8 +127,8 @@ func (eg *encoderGRPC) readBytesWithVarintLen() ([]byte, error) {
 
 	valueStart += eg.readIdx
 	valueEnd := valueStart + int(length)
-	if valueEnd > len(eg.buf) || length < 0 {
-		return nil, fmt.Errorf("malformed encoding: length:%v, upper%v, maxLength:%v", length, valueEnd, len(eg.buf))
+	if valueEnd > len(eg.buf) {
+		return nil, fmt.Errorf("malformed encoding: length:%v, upper:%v, maxLength:%v", length, valueEnd, len(eg.buf))
 	}
 
 	eg.readIdx = valueEnd
@@ -195,10 +195,7 @@ func Decode(bytes []byte) (*Map, error) {
 	for !eg.readEnded() {
 		typ := keyType(eg.readByte())
 
-		switch typ {
-		case keyTypeString:
-			break
-		default:
+		if typ != keyTypeString {
 			return nil, fmt.Errorf("cannot decode: invalid key type: %q", typ)
 		}
 
@@ -218,7 +215,7 @@ func Decode(bytes []byte) (*Map, error) {
 		}
 		val := string(v)
 		if !checkValue(val) {
-			return nil, errInvalid // no partial failures
+			return nil, errInvalidValue // no partial failures
 		}
 		ts.upsert(key, val)
 	}

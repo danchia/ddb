@@ -23,20 +23,20 @@ var (
 
 // Exporter exports the collected records as view data.
 //
-// The Export method should return quickly; if an
+// The ExportView method should return quickly; if an
 // Exporter takes a significant amount of time to
 // process a ViewData, that work should be done on another goroutine.
 //
 // The ViewData should not be modified.
 type Exporter interface {
-	Export(viewData *ViewData)
+	ExportView(viewData *ViewData)
 }
 
 // RegisterExporter registers an exporter.
 // Collected data will be reported via all the
-// registered exporters. Once you don't want data
-// to be expoter on the registered exporter, use
-// UnregisterExporter.
+// registered exporters. Once you no longer
+// want data to be exported, invoke UnregisterExporter
+// with the previously registered exporter.
 func RegisterExporter(e Exporter) {
 	exportersMu.Lock()
 	defer exportersMu.Unlock()

@@ -216,18 +216,9 @@ type recordReq struct {
 
 func (cmd *recordReq) handleCommand(w *worker) {
 	for _, m := range cmd.ms {
-		switch measurement := m.(type) {
-		case *measurementFloat64:
-			ref := w.measures[measurement.m.Name()]
-			for v := range ref.views {
-				v.addSample(cmd.tm, measurement.v, cmd.now)
-			}
-		case *measurementInt64:
-			ref := w.measures[measurement.m.Name()]
-			for v := range ref.views {
-				v.addSample(cmd.tm, measurement.v, cmd.now)
-			}
-		default:
+		ref := w.measures[m.m.Name()]
+		for v := range ref.views {
+			v.addSample(cmd.tm, m.v, cmd.now)
 		}
 	}
 }

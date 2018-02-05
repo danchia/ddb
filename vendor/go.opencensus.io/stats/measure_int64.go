@@ -40,12 +40,5 @@ func (m *MeasureInt64) Unit() string {
 // M creates a new int64 measurement.
 // Use Record to record measurements.
 func (m *MeasureInt64) M(v int64) Measurement {
-	return &measurementInt64{m: m, v: v}
+	return Measurement{m: m, v: v}
 }
-
-type measurementInt64 struct {
-	m *MeasureInt64
-	v int64
-}
-
-func (mi *measurementInt64) isMeasurement() {}
