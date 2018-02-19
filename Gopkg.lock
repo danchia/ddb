@@ -2,12 +2,6 @@
 
 
 [[projects]]
-  name = "github.com/davecgh/go-spew"
-  packages = ["spew"]
-  revision = "346938d642f2ec3594ed81d874461961cd0faa76"
-  version = "v1.1.0"
-
-[[projects]]
   branch = "master"
   name = "github.com/golang/glog"
   packages = ["."]
@@ -51,7 +45,7 @@
 
 [[projects]]
   name = "go.opencensus.io"
-  packages = ["internal/tagencoding","plugin/grpc","plugin/grpc/grpcstats","plugin/grpc/grpctrace","stats","tag","trace","trace/propagation"]
+  packages = ["internal/tagencoding","plugin/grpc","plugin/grpc/grpcstats","plugin/grpc/grpctrace","stats","tag","trace","trace/propagation","zpages"]
   revision = "7e6c5d736280267bc85cfd63b23507c4889ef82e"
   version = "v0.2.0"
 
@@ -69,6 +63,12 @@
 
 [[projects]]
   branch = "master"
+  name = "golang.org/x/time"
+  packages = ["rate"]
+  revision = "6dc17368e09b0e8634d71cac8168d853e869a0c7"
+
+[[projects]]
+  branch = "master"
   name = "google.golang.org/genproto"
   packages = ["googleapis/rpc/status"]
   revision = "a8101f21cf983e773d0c1133ebc5424792003214"
@@ -82,6 +82,6 @@
 [solve-meta]
   analyzer-name = "dep"
   analyzer-version = 1
-  inputs-digest = "12266550df7360b3045319e77080ae916e98f1773bc247e88c946e5b6f63b18e"
+  inputs-digest = "5a144ebc1a5963cb17d5616c00f3027d42536ae94a7d99354e9b35983f735ee9"
   solver-name = "gps-cdcl"
   solver-version = 1
