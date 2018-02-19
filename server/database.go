@@ -45,7 +45,7 @@ type database struct {
 	blockCache *sst.Cache
 	ssts       []*sst.Reader
 
-	mu sync.Mutex
+	mu sync.RWMutex
 }
 
 func newDatabase(opts Options) *database {
@@ -218,25 +218,24 @@ func (d *database) maybeTriggerFlush() {
 }
 
 func (d *database) Find(ctx context.Context, key string) ([]byte, error) {
-	d.mu.Lock()
+	// Acquire local copies of required structures, so that we can release lock quickly.
+	d.mu.RLock()
+	ssts := make([]*sst.Reader, len(d.ssts))
+	copy(ssts, d.ssts)
+	memtable := d.memtable
+	imemtable := d.imemtable
+	d.mu.RUnlock()
 
-	v, found := d.memtable.Find(key)
+	v, found := memtable.Find(key)
 	if found {
-		d.mu.Unlock()
 		return v, nil
 	}
-	if d.imemtable != nil {
-		v, found = d.imemtable.Find(key)
+	if imemtable != nil {
+		v, found = imemtable.Find(key)
 		if found {
-			d.mu.Unlock()
 			return v, nil
 		}
 	}
-
-	ssts := make([]*sst.Reader, len(d.ssts))
-	copy(ssts, d.ssts)
-	// Don't hold lock while reading from SST.
-	d.mu.Unlock()
 
 	var value []byte
 	valueTs := int64(math.MinInt64)

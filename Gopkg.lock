@@ -3,6 +3,12 @@
 
 [[projects]]
   branch = "master"
+  name = "github.com/codahale/hdrhistogram"
+  packages = ["."]
+  revision = "3a0bb77429bd3a61596f5e8a3172445844342120"
+
+[[projects]]
+  branch = "master"
   name = "github.com/golang/glog"
   packages = ["."]
   revision = "23def4e6c14b4da8ac2ed8007337bc5eb5007998"
@@ -82,6 +88,6 @@
 [solve-meta]
   analyzer-name = "dep"
   analyzer-version = 1
-  inputs-digest = "5a144ebc1a5963cb17d5616c00f3027d42536ae94a7d99354e9b35983f735ee9"
+  inputs-digest = "ab3344411170fa60848601b8aea99307884d44e3686636d6590316a8d72f5759"
   solver-name = "gps-cdcl"
   solver-version = 1

@@ -15,7 +15,12 @@
 package common
 
 import (
+	"log"
+	"net/http"
+	_ "net/http/pprof" // debug handlers
+
 	pb "github.com/danchia/ddb/proto"
+	"go.opencensus.io/zpages"
 	"google.golang.org/grpc"
 )
 
@@ -27,4 +32,12 @@ func GetDDB(addr string) (pb.DdbClient, error) {
 	}
 	client := pb.NewDdbClient(conn)
 	return client, nil
+}
+
+// SetupDebugServer starts a HTTP server and installs the standard Go debug handles.
+func SetupDebugServer() {
+	zpages.AddDefaultHTTPHandlers()
+	if err := http.ListenAndServe(":8080", nil); err != nil {
+		log.Fatal(err)
+	}
 }

@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	_ "net/http/pprof" // add debug handlers
 
 	pb "github.com/danchia/ddb/proto"
 	"github.com/danchia/ddb/server"
@@ -43,6 +44,7 @@ func main() {
 	}
 	ocStats := ocgrpc.NewServerStatsHandler()
 	gs := grpc.NewServer(grpc.StatsHandler(ocStats))
+
 	ds := server.NewServer(server.DefaultOptions("/tmp/ddb"))
 	pb.RegisterDdbServer(gs, ds)
 

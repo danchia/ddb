@@ -60,3 +60,7 @@
 [[constraint]]
   branch = "master"
   name = "golang.org/x/time"
+
+[[constraint]]
+  branch = "master"
+  name = "github.com/codahale/hdrhistogram"
