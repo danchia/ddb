@@ -27,7 +27,7 @@ const (
 	// Slightly larger than DB MaxKeySize due to additional data.
 	MaxSstKeySize = 8*1024 + 16
 
-	footerSize = binary.MaxVarintLen64 + 4 + 8
+	footerSize = 4*binary.MaxVarintLen64 + 4 + 8
 )
 
 const (

@@ -38,6 +38,12 @@
   version = "v1.0"
 
 [[projects]]
+  name = "github.com/spaolacci/murmur3"
+  packages = ["."]
+  revision = "9f5d223c60793748f04a9d5b4b4eacddfc1f755d"
+  version = "v1.1"
+
+[[projects]]
   name = "github.com/spf13/cobra"
   packages = ["."]
   revision = "7b2c5ac9fc04fc5efafb60700713d4fa609b777b"
@@ -88,6 +94,10 @@
 [solve-meta]
   analyzer-name = "dep"
   analyzer-version = 1
+<<<<<<< HEAD
   inputs-digest = "ab3344411170fa60848601b8aea99307884d44e3686636d6590316a8d72f5759"
+=======
+  inputs-digest = "ea27d3ef420541e7745f8678c543a7f76f04dcbaaab063a24ebaa89426c6a12a"
+>>>>>>> Run dep ensure, adding murmur3.
   solver-name = "gps-cdcl"
   solver-version = 1

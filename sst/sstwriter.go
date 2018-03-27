@@ -33,8 +33,9 @@ type Writer struct {
 	lastKey string
 	offset  uint64
 
-	dataBlockB  *dataBlockBuilder
-	indexBlockB *indexBlockBuilder
+	dataBlockB   *dataBlockBuilder
+	indexBlockB  *indexBlockBuilder
+	filterBlockB *filterBlockBuilder
 }
 
 func NewWriter(filename string) (*Writer, error) {
@@ -44,11 +45,12 @@ func NewWriter(filename string) (*Writer, error) {
 	}
 
 	w := &Writer{
-		f:           f,
-		w:           bufio.NewWriter(f),
-		crc:         crc32.New(crcTable),
-		dataBlockB:  newDataBlockBuilder(),
-		indexBlockB: newIndexBlockBuilder(),
+		f:            f,
+		w:            bufio.NewWriter(f),
+		crc:          crc32.New(crcTable),
+		dataBlockB:   newDataBlockBuilder(),
+		indexBlockB:  newIndexBlockBuilder(),
+		filterBlockB: newFilterBlockBuilder(),
 	}
 	return w, nil
 }
@@ -56,6 +58,7 @@ func NewWriter(filename string) (*Writer, error) {
 // Append writes a new row to the SSTable.
 // Must be called in order, i.e. key asc, timestamp desc
 func (s *Writer) Append(key string, timestamp int64, value []byte) error {
+	s.filterBlockB.Append(key)
 	if s.dataBlockB.EstimatedSizeBytes() > blockSize {
 		if err := s.flushBlock(); err != nil {
 			return err
@@ -91,7 +94,11 @@ func (s *Writer) Close() error {
 	if err != nil {
 		return err
 	}
-	if err := s.writeFooter(indexHandle); err != nil {
+	filterHandle, err := s.writeFilterBlock()
+	if err != nil {
+		return err
+	}
+	if err := s.writeFooter(indexHandle, filterHandle); err != nil {
 		return err
 	}
 	if err := s.w.Flush(); err != nil {
@@ -106,6 +113,13 @@ func (s *Writer) writeIndexBlock() (blockHandle, error) {
 	if err != nil {
 		return blockHandle{}, err
 	}
+	bh := blockHandle{s.offset, uint64(len(d))}
+	return bh, s.writeChecksummedBlock(d)
+}
+
+// writeFilterBlock writes the filter block and returns a blockHandle pointing to it.
+func (s *Writer) writeFilterBlock() (blockHandle, error) {
+	d := s.filterBlockB.Finish()
 	bh := blockHandle{s.offset, uint64(len(d))}
 	return bh, s.writeChecksummedBlock(d)
 }
@@ -129,10 +143,14 @@ func (s *Writer) writeChecksummedBlock(d []byte) error {
 	return nil
 }
 
-func (s *Writer) writeFooter(indexHandle blockHandle) error {
+func (s *Writer) writeFooter(indexHandle blockHandle, filterHandle blockHandle) error {
 	footer := new(bytes.Buffer)
 	indexHandle.EncodeTo(footer)
-	for footer.Len() < binary.MaxVarintLen64 {
+	for footer.Len() < 2*binary.MaxVarintLen64 {
+		footer.WriteByte(0)
+	}
+	filterHandle.EncodeTo(footer)
+	for footer.Len() < 4*binary.MaxVarintLen64 {
 		footer.WriteByte(0)
 	}
 
@@ -147,7 +165,7 @@ func (s *Writer) writeFooter(indexHandle blockHandle) error {
 
 	d := footer.Bytes()
 	if len(d) != footerSize {
-		glog.Fatalf("writerFooter generated footer of wrong length: %v", d)
+		glog.Fatalf("writeFooter generated footer of wrong length: %v", d)
 	}
 
 	_, err := s.w.Write(d)

@@ -32,7 +32,8 @@ type Reader struct {
 	fLength  int64
 	filename string
 
-	indexBlockHandle blockHandle
+	indexBlockHandle  blockHandle
+	filterBlockHandle blockHandle
 
 	cache   *Cache
 	cacheID uint64
@@ -68,7 +69,14 @@ type Iter struct {
 	r *Reader
 }
 
+// Find returns the value of key in SST.
 func (r *Reader) Find(ctx context.Context, key string) (value []byte, ts int64, err error) {
+	/// Test filter block for presence
+	fb, err := r.getFilterBlock()
+	if !fb.Test(key) {
+		return nil, 0, ErrNotFound
+	}
+
 	bh, err := r.findDataBlock(key)
 	if err != nil {
 		return nil, 0, err
@@ -81,6 +89,14 @@ func (r *Reader) Find(ctx context.Context, key string) (value []byte, ts int64, 
 
 	db := newDataBlock(data)
 	return db.Find(key)
+}
+
+func (r *Reader) getFilterBlock() (*filterBlock, error) {
+	bd, err := r.readRawBlock(r.filterBlockHandle)
+	if err != nil {
+		return nil, err
+	}
+	return newFilterBlock(bd), nil
 }
 
 // findDataBlock finds the first data block containing key.
@@ -153,6 +169,11 @@ func (r *Reader) readFooter() error {
 		return err
 	}
 	r.indexBlockHandle = ibh
+	fbh, err := newBlockHandle(bytes.NewReader(footer[2*binary.MaxVarintLen64:]))
+	if err != nil {
+		return err
+	}
+	r.filterBlockHandle = fbh
 	return nil
 }
 
