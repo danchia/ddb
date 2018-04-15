@@ -98,6 +98,8 @@ func newDatabase(opts Options) *database {
 	}
 	db.logWriter = logWriter
 
+	go db.compactor()
+
 	return db
 }
 
@@ -308,6 +310,120 @@ func (d *database) flushIMemtable() {
 	}
 	d.imemtable = nil
 	d.ssts = append(d.ssts, reader)
+	d.mu.Unlock()
+}
+
+// compactor monitors the number of SSTs, and triggers compaction when necessary.
+// Currently the scheme is a very simple one - if there are more than 8 SSTs then compaction
+// of all the SSTs is triggered.
+func (d *database) compactor() {
+	ticker := time.NewTicker(1 * time.Second)
+	for range ticker.C {
+		var toCompact []*sst.Reader
+		d.mu.RLock()
+		if len(d.ssts) > 8 {
+			toCompact = d.ssts
+		}
+		d.mu.RUnlock()
+
+		if len(toCompact) > 0 {
+			d.compact(toCompact)
+		}
+	}
+}
+
+// compact compacts ssts into a single SST and modifies the descriptor as appropriate.
+func (d *database) compact(ssts []*sst.Reader) {
+	ts := time.Now().UnixNano()
+	fn := fmt.Sprintf("%020d.sst", ts)
+	fullFn := filepath.Join(d.opts.SstDir, fn)
+
+	glog.Infof("Compacting %v SSTs to %v", len(ssts), fullFn)
+	if glog.V(4) {
+		var names []string
+		for _, sst := range ssts {
+			names = append(names, sst.Filename())
+		}
+		glog.Infof("SSTs being compacted are %v", names)
+	}
+
+	iters := make([]Iter, len(ssts))
+	for i, sst := range ssts {
+		iter, err := sst.NewIter()
+		if err != nil {
+			glog.Fatalf("Error creating SST iter for compaction: %v", err)
+		}
+		iters[i] = iter
+	}
+
+	mIter, err := newMergingIter(iters)
+	if err != nil {
+		glog.Fatalf("Error creating merge iter: %v", err)
+	}
+
+	writer, err := sst.NewWriter(fullFn)
+	if err != nil {
+		glog.Fatalf("Error opening SST for writing: %v", err)
+	}
+
+	for {
+		hasNext, err := mIter.Next()
+		if err != nil {
+			glog.Fatalf("Error writing to SST during compaction: %v", err)
+		}
+		if !hasNext {
+			break
+		}
+
+		writer.Append(mIter.Key(), mIter.Timestamp(), mIter.Value())
+	}
+
+	if err := writer.Close(); err != nil {
+		glog.Fatalf("Error closing writer while compacting: %v", err)
+	}
+
+	glog.Infof("Compaction finished for %v", fullFn)
+
+	filenames := make(map[string]bool)
+	for _, sst := range ssts {
+		filenames[sst.Filename()] = true
+	}
+
+	reader, err := sst.NewReader(fullFn, d.blockCache)
+	if err != nil {
+		glog.Fatalf("error opening freshly compacted SST %v: %v", fullFn, err)
+	}
+
+	d.mu.Lock()
+	var newMetas []*pb.SstMeta
+	maxApplied := int64(0)
+	for _, meta := range d.descriptor.Current.SstMeta {
+		if filenames[filepath.Join(d.opts.SstDir, meta.Filename)] {
+			if meta.AppliedUntil > maxApplied {
+				maxApplied = meta.AppliedUntil
+			}
+			continue
+		}
+		newMetas = append(newMetas, meta)
+	}
+	newMeta := &pb.SstMeta{Filename: fn, AppliedUntil: maxApplied}
+	newMetas = append(newMetas, newMeta)
+	d.descriptor.Current.SstMeta = newMetas
+	if err := d.descriptor.Save(); err != nil {
+		glog.Fatalf("error saving descriptor while flushing memtable: %v", err)
+	}
+
+	glog.V(4).Infof("Descriptor after compaction is: %v", d.descriptor)
+
+	var newSsts []*sst.Reader
+	for _, sst := range d.ssts {
+		if filenames[sst.Filename()] {
+			continue
+		}
+		newSsts = append(newSsts, sst)
+	}
+	newSsts = append(newSsts, reader)
+	d.ssts = newSsts
 	d.mu.Unlock()
 }
 

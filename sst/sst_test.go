@@ -24,6 +24,7 @@ import (
 	"sort"
 	"testing"
 
+	"github.com/golang/glog"
 	"github.com/google/go-cmp/cmp"
 )
 
@@ -149,6 +150,72 @@ func TestFind(t *testing.T) {
 	}
 }
 
+func TestIter(t *testing.T) {
+	dir, err := ioutil.TempDir("", "ssttest")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(dir)
+	fname := filepath.Join(dir, "1.sst")
+
+	w, err := NewWriter(fname)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for i := 0; i < 1000; i++ {
+		var value []byte
+		if i%7 != 0 {
+			value = []byte{byte(i)}
+		}
+		w.Append(fmt.Sprint(i), int64(i+1), value)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	r, err := NewReader(fname, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	iter, err := r.NewIter()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	cur := 0
+	for {
+		hasNext, err := iter.Next()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !hasNext {
+			break
+		}
+
+		glog.V(8).Infof("Reading row %v", cur)
+
+		var wantValue []byte
+		if cur%7 != 0 {
+			wantValue = []byte{byte(cur)}
+		}
+		if iter.Key() != fmt.Sprint(cur) ||
+			iter.Timestamp() != int64(cur+1) || !cmp.Equal(iter.Value(), wantValue) {
+
+			t.Errorf(
+				"iter got (%v, %v, %v), want (%v, %v, %v)",
+				iter.Key(), iter.Timestamp(), iter.Value(),
+				cur, cur+1, wantValue)
+		}
+		cur++
+	}
+
+	if cur != 1000 {
+		t.Errorf("Only read %d out of 1000 values.", cur)
+	}
+}
+
 func TestRandomData(t *testing.T) {
 	dir, err := ioutil.TempDir("", "ssttest")
 	if err != nil {
@@ -190,14 +257,41 @@ func TestRandomData(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	r, err := NewReader(fname, nil)
-	if err != nil {
-		t.Fatal(err)
+	{
+		r, err := NewReader(fname, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		iter, err := r.NewIter()
+		if err != nil {
+			t.Fatal(err)
+		}
+		for idx, key := range keys {
+			tsV := data[key]
+			hasNext, err := iter.Next()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !hasNext {
+				t.Fatalf("Missing key %v after %v rows", key, idx)
+			}
+			if iter.Key() != key || iter.Timestamp() != tsV.ts || !cmp.Equal(iter.Value(), tsV.value) {
+				t.Errorf("Iter %v,%#v,%v want %v,%#v,%v", iter.Key(), iter.Value(), iter.Timestamp(),
+					key, tsV.value, tsV.ts)
+			}
+
+		}
 	}
 
-	for key, tsV := range data {
-		if gotV, gotTs, err := r.Find(context.Background(), key); err != nil || gotTs != tsV.ts || !cmp.Equal(gotV, tsV.value) {
-			t.Errorf("Find(%v)=%#v,%v,%v want %#v,%v,%v", key, gotV, gotTs, err, tsV.value, tsV.ts, nil)
+	{
+		r, err := NewReader(fname, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for key, tsV := range data {
+			if gotV, gotTs, err := r.Find(context.Background(), key); err != nil || gotTs != tsV.ts || !cmp.Equal(gotV, tsV.value) {
+				t.Errorf("Find(%v)=%#v,%v,%v want %#v,%v,%v", key, gotV, gotTs, err, tsV.value, tsV.ts, nil)
+			}
 		}
 	}
 }

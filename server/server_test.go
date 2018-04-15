@@ -17,13 +17,16 @@ package server
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"io/ioutil"
 	"os"
 	"strings"
 	"testing"
 
 	pb "github.com/danchia/ddb/proto"
+	"github.com/golang/glog"
 	"github.com/golang/protobuf/proto"
+	"github.com/google/go-cmp/cmp"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
@@ -136,4 +139,67 @@ func TestInvalidSet(t *testing.T) {
 			t.Errorf("Set with invalid req %v, got status %v want %v", r, status, tt.want)
 		}
 	}
+}
+
+func TestManyReadsAndWrites(t *testing.T) {
+	dir, err := ioutil.TempDir("", "waltest")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(dir)
+	opts := DefaultOptions(dir)
+	opts.MemtableFlushSize = 1024 // make more SSTs sooner
+	s := NewServer(opts)
+
+	keys := 300
+
+	for i := 0; i < keys; i++ {
+		if i%100 == 0 {
+			glog.V(2).Infof("Iteration %v", i)
+		}
+
+		bytes := make([]byte, 100)
+		bytes[0] = byte(i)
+
+		r := &pb.SetRequest{Key: fmt.Sprintf("%v", i), Value: bytes}
+		_, err := s.Set(context.Background(), r)
+		if err != nil {
+			t.Fatalf("Set - Unexpected error %v", err)
+		}
+
+		// validate existing keys
+		for j := 0; j <= i; j++ {
+			expectedKey := fmt.Sprintf("%v", j)
+			expectedValue := make([]byte, 100)
+			expectedValue[0] = byte(j)
+
+			r := &pb.GetRequest{Key: expectedKey}
+			rs, err := s.Get(context.Background(), r)
+			if err != nil {
+				t.Fatalf("Get i,j %v,%v - Unexpected error %v", i, j, err)
+			}
+
+			if rs.GetKey() != expectedKey || !cmp.Equal(rs.Value, expectedValue) {
+				t.Fatalf("Get(%v)=%v,%+v, want %v %+v", j, rs.GetKey(), rs.GetValue(), expectedKey, expectedValue)
+			}
+		}
+	}
+
+	/*
+		// validate all
+		for j := 0; j <= keys; j++ {
+			expectedKey := fmt.Sprintf("%v", j)
+			expectedValue := make([]byte, 100)
+			expectedValue[0] = byte(j)
+
+			r := &pb.GetRequest{Key: expectedKey}
+			rs, err := s.Get(context.Background(), r)
+			if err != nil {
+				t.Errorf("Get j %v - Unexpected error %v", j, err)
+			}
+
+			if rs.GetKey() != expectedKey || !cmp.Equal(rs.Value, expectedValue) {
+				t.Errorf("Get(%v)=%v,%+v, want %v %+v", j, rs.GetKey(), rs.GetValue(), expectedKey, expectedValue)
+			}
+		} */
 }

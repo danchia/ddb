@@ -65,8 +65,14 @@ func NewReader(filename string, cache *Cache) (*Reader, error) {
 	return r, nil
 }
 
-type Iter struct {
-	r *Reader
+// Filename returns the full file path of the SST.
+func (r *Reader) Filename() string {
+	return r.filename
+}
+
+// NewIter returns a new SST iterator. Must close after use.
+func (r *Reader) NewIter() (*Iter, error) {
+	return newIter(r)
 }
 
 // Find returns the value of key in SST.
@@ -82,7 +88,7 @@ func (r *Reader) Find(ctx context.Context, key string) (value []byte, ts int64, 
 		return nil, 0, err
 	}
 	glog.V(4).Infof("reading data block %v", bh)
-	data, err := r.readRawBlock(bh)
+	data, err := r.readRawBlock(bh, true)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -92,7 +98,7 @@ func (r *Reader) Find(ctx context.Context, key string) (value []byte, ts int64, 
 }
 
 func (r *Reader) getFilterBlock() (*filterBlock, error) {
-	bd, err := r.readRawBlock(r.filterBlockHandle)
+	bd, err := r.readRawBlock(r.filterBlockHandle, true)
 	if err != nil {
 		return nil, err
 	}
@@ -105,7 +111,7 @@ func (r *Reader) findDataBlock(key string) (blockHandle, error) {
 	var res blockHandle
 
 	glog.V(4).Infof("reading index block %v", r.indexBlockHandle)
-	ibd, err := r.readRawBlock(r.indexBlockHandle)
+	ibd, err := r.readRawBlock(r.indexBlockHandle, true)
 	if err != nil {
 		return res, err
 	}
@@ -114,7 +120,7 @@ func (r *Reader) findDataBlock(key string) (blockHandle, error) {
 	return ib.Find(key)
 }
 
-func (r *Reader) readRawBlock(h blockHandle) ([]byte, error) {
+func (r *Reader) readRawBlock(h blockHandle, fillCache bool) ([]byte, error) {
 	glog.V(4).Infof("reading raw block: %v", h)
 
 	var cacheKey string
@@ -140,7 +146,7 @@ func (r *Reader) readRawBlock(h blockHandle) ([]byte, error) {
 		return nil, ErrCorruption
 	}
 
-	if r.cache != nil {
+	if r.cache != nil && fillCache {
 		r.cache.Insert(cacheKey, bd)
 	}
 	return bd, nil
@@ -186,4 +192,66 @@ func verifyChecksum(data []byte, sum []byte) bool {
 		glog.V(2).Infof("crc got, want: %v %v", c, ec)
 	}
 	return ec == c
+}
+
+type Iter struct {
+	r          *Reader
+	nextDBlock int
+	dBlocks    []blockHandle
+	dBlockIter *dataBlockIter
+}
+
+func newIter(r *Reader) (*Iter, error) {
+	ibd, err := r.readRawBlock(r.indexBlockHandle, false)
+	if err != nil {
+		return nil, err
+	}
+	ib := newIndexBlock(ibd)
+
+	dBlocks, err := ib.Blocks()
+	if err != nil {
+		return nil, err
+	}
+	return &Iter{r: r, dBlocks: dBlocks}, nil
+}
+
+// Next advances the iterator. Returns true if there is a next value.
+func (i *Iter) Next() (bool, error) {
+	for {
+		if i.dBlockIter == nil {
+			if i.nextDBlock >= len(i.dBlocks) {
+				return false, nil
+			}
+			dBytes, err := i.r.readRawBlock(i.dBlocks[i.nextDBlock], false)
+			if err != nil {
+				return false, err
+			}
+			dBlock := newDataBlock(dBytes)
+			i.dBlockIter = dBlock.NewIter()
+			i.nextDBlock++
+		}
+
+		hasNext, err := i.dBlockIter.Next()
+		if err != nil {
+			return false, err
+		}
+		if hasNext {
+			return true, nil
+		}
+
+		// continue to next dblock
+		i.dBlockIter = nil
+	}
+}
+
+func (i *Iter) Key() string {
+	return i.dBlockIter.Key()
+}
+
+func (i *Iter) Value() []byte {
+	return i.dBlockIter.Value()
+}
+
+func (i *Iter) Timestamp() int64 {
+	return i.dBlockIter.Timestamp()
 }
