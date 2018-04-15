@@ -123,3 +123,26 @@ func (b *indexBlock) Find(key string) (blockHandle, error) {
 	}
 	return bh, ErrNotFound
 }
+
+// Blocks returns the list of data blocks in this index.
+func (b *indexBlock) Blocks() ([]blockHandle, error) {
+	var lastKey []byte
+	kb := make([]byte, 0, MaxSstKeySize)
+	var blocks []blockHandle
+
+	for b.r.Len() > 0 {
+		eKey, err := prefixDecodeFrom(b.r, lastKey, kb)
+		lastKey = eKey
+		valueLen, err := binary.ReadUvarint(b.r)
+		if err != nil {
+			return nil, err
+		}
+		bh, err := newBlockHandle(b.r)
+		if err != nil {
+			return nil, err
+		}
+		blocks := append(blocks, bh)
+	}
+
+	return blocks, nil
+}

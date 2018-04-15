@@ -311,6 +311,29 @@ func (d *database) flushIMemtable() {
 	d.mu.Unlock()
 }
 
+// compactor monitors the number of SSTs, and triggers compaction when necessary.
+// Currently the scheme is a very simple one - if there are more than 8 SSTs then compaction
+// of all the SSTs is triggered.
+func (d *database) compactor() {
+	for {
+		var toCompact []*pb.SstMeta
+		d.mu.RLock()
+		if len(d.descriptor.Current.SstMeta) > 8 {
+			toCompact = d.descriptor.Current.SstMeta
+		}
+		d.mu.RUnlock()
+
+		if len(toCompact) > 0 {
+			d.compact(toCompact)
+		}
+	}
+}
+
+// compact compacts ssts into a single SST and modifies the descriptor as appropriate.
+func (d *database) compact(ssts []*pb.SstMeta) {
+
+}
+
 func validateKey(k string) error {
 	if k == "" {
 		return status.Error(codes.InvalidArgument, "Key cannot be empty.")
