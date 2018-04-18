@@ -133,15 +133,14 @@ func (b *indexBlock) Blocks() ([]blockHandle, error) {
 	for b.r.Len() > 0 {
 		eKey, err := prefixDecodeFrom(b.r, lastKey, kb)
 		lastKey = eKey
-		valueLen, err := binary.ReadUvarint(b.r)
-		if err != nil {
+		if _, err := binary.ReadUvarint(b.r); err != nil {
 			return nil, err
 		}
 		bh, err := newBlockHandle(b.r)
 		if err != nil {
 			return nil, err
 		}
-		blocks := append(blocks, bh)
+		blocks = append(blocks, bh)
 	}
 
 	return blocks, nil

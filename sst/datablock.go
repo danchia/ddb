@@ -183,3 +183,71 @@ func parseEKey(eKey string) (key string, ts int64, err error) {
 	}
 	return readKey, ts, nil
 }
+
+type dataBlockIter struct {
+	b        *dataBlock
+	r        *bytes.Reader
+	curKey   string
+	curValue []byte
+	curTs    int64
+
+	// Current key, encoded.
+	curEKey []byte
+}
+
+func (b *dataBlock) NewIter() *dataBlockIter {
+	// TODO: reader probably should be cloned...
+	return &dataBlockIter{b: b, r: b.r}
+}
+
+func (i *dataBlockIter) Key() string {
+	return i.curKey
+}
+
+func (i *dataBlockIter) Value() []byte {
+	return i.curValue
+}
+
+func (i *dataBlockIter) Timestamp() int64 {
+	return i.curTs
+}
+
+func (i *dataBlockIter) Next() (bool, error) {
+	if i.r.Len() == 0 {
+		return false, nil
+	}
+	// TODO: ugh, this is kind of ugly. redo scratch space somehow?
+	kb := i.curEKey
+	if i.curEKey == nil {
+		kb = make([]byte, MaxSstKeySize)
+	}
+
+	eKey, err := prefixDecodeFrom(i.r, i.curEKey, kb)
+	if err != nil {
+		return false, err
+	}
+	i.curEKey = eKey
+
+	curKey, curTs, err := parseEKey(string(eKey))
+	if err != nil {
+		return false, err
+	}
+	i.curKey = curKey
+	i.curTs = curTs
+
+	valueLen, err := binary.ReadUvarint(i.r)
+	if err != nil {
+		return false, err
+	}
+
+	value := make([]byte, valueLen)
+	if _, err = io.ReadFull(i.r, value); err != nil {
+		return false, err
+	}
+	if value[0] == typeNil {
+		i.curValue = nil
+	} else {
+		i.curValue = value[1:]
+	}
+	return true, nil
+}

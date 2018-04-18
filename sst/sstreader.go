@@ -193,6 +193,7 @@ type Iter struct {
 	r          *Reader
 	nextDBlock int
 	dBlocks    []blockHandle
+	dBlockIter *dataBlockIter
 }
 
 func newIter(r *Reader) (*Iter, error) {
@@ -209,6 +210,43 @@ func newIter(r *Reader) (*Iter, error) {
 	return &Iter{r: r, dBlocks: dBlocks}, nil
 }
 
-func (i *Iter) Next() (bool, err) {
+// Next advances the iterator. Returns true if there is a next value.
+func (i *Iter) Next() (bool, error) {
+	for {
+		if i.dBlockIter == nil {
+			if i.nextDBlock >= len(i.dBlocks) {
+				return false, nil
+			}
+			dBytes, err := i.r.readRawBlock(i.dBlocks[i.nextDBlock], false)
+			if err != nil {
+				return false, err
+			}
+			dBlock := newDataBlock(dBytes)
+			i.dBlockIter = dBlock.NewIter()
+			i.nextDBlock++
+		}
 
+		hasNext, err := i.dBlockIter.Next()
+		if err != nil {
+			return false, err
+		}
+		if hasNext {
+			return true, nil
+		}
+
+		// continue to next dblock
+		i.dBlockIter = nil
+	}
+}
+
+func (i *Iter) Key() string {
+	return i.dBlockIter.Key()
+}
+
+func (i *Iter) Value() []byte {
+	return i.dBlockIter.Value()
+}
+
+func (i *Iter) Timestamp() int64 {
+	return i.dBlockIter.Timestamp()
 }
