@@ -98,6 +98,8 @@ func newDatabase(opts Options) *database {
 	}
 	db.logWriter = logWriter
 
+	go db.compactor()
+
 	return db
 }
 
@@ -315,7 +317,8 @@ func (d *database) flushIMemtable() {
 // Currently the scheme is a very simple one - if there are more than 8 SSTs then compaction
 // of all the SSTs is triggered.
 func (d *database) compactor() {
-	for {
+	ticker := time.NewTicker(1 * time.Second)
+	for range ticker.C {
 		var toCompact []*sst.Reader
 		d.mu.RLock()
 		if len(d.ssts) > 8 {
@@ -341,13 +344,8 @@ func (d *database) compact(ssts []*sst.Reader) {
 		for _, sst := range ssts {
 			names = append(names, sst.Filename())
 		}
-		glog.Infof("SSTs being compared are %v", names)
+		glog.Infof("SSTs being compacted are %v", names)
 	}
-
-	// writer, err := sst.NewWriter(fullFn)
-	// if err != nil {
-	// 	glog.Fatalf("Error opening SST for writing: %v", err)
-	// }
 
 	iters := make([]*sst.Iter, len(ssts))
 	for i, sst := range ssts {
@@ -357,6 +355,76 @@ func (d *database) compact(ssts []*sst.Reader) {
 		}
 		iters[i] = iter
 	}
+
+	mIter, err := newMergingIter(iters)
+	if err != nil {
+		glog.Fatalf("Error creating merge iter: %v", err)
+	}
+
+	writer, err := sst.NewWriter(fullFn)
+	if err != nil {
+		glog.Fatalf("Error opening SST for writing: %v", err)
+	}
+
+	for {
+		hasNext, err := mIter.Next()
+		if err != nil {
+			glog.Fatalf("Error writing to SST during compaction: %v", err)
+		}
+		if !hasNext {
+			break
+		}
+
+		writer.Append(mIter.Key(), mIter.Timestamp(), mIter.Value())
+	}
+
+	if err := writer.Close(); err != nil {
+		glog.Fatalf("Error closing writer while compacting: %v", err)
+	}
+
+	glog.Infof("Compaction finished for %v", fullFn)
+
+	filenames := make(map[string]bool)
+	for _, sst := range ssts {
+		filenames[sst.Filename()] = true
+	}
+
+	reader, err := sst.NewReader(fullFn, d.blockCache)
+	if err != nil {
+		glog.Fatalf("error opening freshly compacted SST %v: %v", fullFn, err)
+	}
+
+	d.mu.Lock()
+	var newMetas []*pb.SstMeta
+	maxApplied := int64(0)
+	for _, meta := range d.descriptor.Current.SstMeta {
+		if filenames[filepath.Join(d.opts.SstDir, meta.Filename)] {
+			if meta.AppliedUntil > maxApplied {
+				maxApplied = meta.AppliedUntil
+			}
+			continue
+		}
+		newMetas = append(newMetas, meta)
+	}
+	newMeta := &pb.SstMeta{Filename: fn, AppliedUntil: maxApplied}
+	newMetas = append(newMetas, newMeta)
+	d.descriptor.Current.SstMeta = newMetas
+	if err := d.descriptor.Save(); err != nil {
+		glog.Fatalf("error saving descriptor while flushing memtable: %v", err)
+	}
+
+	glog.V(4).Infof("Descriptor after compaction is: %v", d.descriptor)
+
+	var newSsts []*sst.Reader
+	for _, sst := range d.ssts {
+		if filenames[sst.Filename()] {
+			continue
+		}
+		newSsts = append(newSsts, sst)
+	}
+	newSsts = append(newSsts, reader)
+	d.ssts = newSsts
+	d.mu.Unlock()
 }
 
 func validateKey(k string) error {

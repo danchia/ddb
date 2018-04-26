@@ -30,7 +30,8 @@ type mergingIter struct {
 }
 
 func newMergingIter(iters []*sst.Iter) (*mergingIter, error) {
-	mi := &mergingIter{}
+	mi := &mergingIter{h: new(iterHeap)}
+
 	for _, iter := range iters {
 		hasNext, err := iter.Next()
 		if err != nil {
@@ -62,6 +63,15 @@ func (i *mergingIter) Next() (bool, error) {
 
 	return i.h.Len() > 0, nil
 }
+
+// Key returns the current key.
+func (i *mergingIter) Key() string { return i.curKey }
+
+// Timestamp returns the current timestamp.
+func (i *mergingIter) Timestamp() int64 { return i.curTs }
+
+// Value returns the current value.
+func (i *mergingIter) Value() []byte { return i.curValue }
 
 type iterHeap []*sst.Iter
 
