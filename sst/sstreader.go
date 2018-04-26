@@ -65,6 +65,11 @@ func NewReader(filename string, cache *Cache) (*Reader, error) {
 	return r, nil
 }
 
+// Filename returns the full file path of the SST.
+func (r *Reader) Filename() string {
+	return r.filename
+}
+
 // NewIter returns a new SST iterator. Must close after use.
 func (r *Reader) NewIter() (*Iter, error) {
 	return newIter(r)

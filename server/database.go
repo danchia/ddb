@@ -316,10 +316,10 @@ func (d *database) flushIMemtable() {
 // of all the SSTs is triggered.
 func (d *database) compactor() {
 	for {
-		var toCompact []*pb.SstMeta
+		var toCompact []*sst.Reader
 		d.mu.RLock()
-		if len(d.descriptor.Current.SstMeta) > 8 {
-			toCompact = d.descriptor.Current.SstMeta
+		if len(d.ssts) > 8 {
+			toCompact = d.ssts
 		}
 		d.mu.RUnlock()
 
@@ -330,8 +330,33 @@ func (d *database) compactor() {
 }
 
 // compact compacts ssts into a single SST and modifies the descriptor as appropriate.
-func (d *database) compact(ssts []*pb.SstMeta) {
+func (d *database) compact(ssts []*sst.Reader) {
+	ts := time.Now().UnixNano()
+	fn := fmt.Sprintf("%020d.sst", ts)
+	fullFn := filepath.Join(d.opts.SstDir, fn)
 
+	glog.Infof("Compacting %v SSTs to %v", len(ssts), fullFn)
+	if glog.V(4) {
+		var names []string
+		for _, sst := range ssts {
+			names = append(names, sst.Filename())
+		}
+		glog.Infof("SSTs being compared are %v", names)
+	}
+
+	// writer, err := sst.NewWriter(fullFn)
+	// if err != nil {
+	// 	glog.Fatalf("Error opening SST for writing: %v", err)
+	// }
+
+	iters := make([]*sst.Iter, len(ssts))
+	for i, sst := range ssts {
+		iter, err := sst.NewIter()
+		if err != nil {
+			glog.Fatalf("Error creating SST iter for compaction: %v", err)
+		}
+		iters[i] = iter
+	}
 }
 
 func validateKey(k string) error {
