@@ -16,11 +16,9 @@ package server
 
 import (
 	"container/heap"
-
-	"github.com/danchia/ddb/sst"
 )
 
-// mergingIter is an iterator that merges from many sst.Iter.
+// mergingIter is an iterator that merges from many Iter.
 type mergingIter struct {
 	h *iterHeap
 
@@ -29,7 +27,7 @@ type mergingIter struct {
 	curValue []byte
 }
 
-func newMergingIter(iters []*sst.Iter) (*mergingIter, error) {
+func newMergingIter(iters []Iter) (*mergingIter, error) {
 	mi := &mergingIter{h: new(iterHeap)}
 
 	for _, iter := range iters {
@@ -47,7 +45,11 @@ func newMergingIter(iters []*sst.Iter) (*mergingIter, error) {
 
 // Next advances the iterator. Returns true if there is a next value.
 func (i *mergingIter) Next() (bool, error) {
-	iter := heap.Pop(i.h).(*sst.Iter)
+	if i.h.Len() == 0 {
+		return false, nil
+	}
+
+	iter := heap.Pop(i.h).(Iter)
 	i.curKey = iter.Key()
 	i.curTs = iter.Timestamp()
 	i.curValue = iter.Value()
@@ -61,7 +63,7 @@ func (i *mergingIter) Next() (bool, error) {
 		heap.Push(i.h, iter)
 	}
 
-	return i.h.Len() > 0, nil
+	return true, nil
 }
 
 // Key returns the current key.
@@ -73,7 +75,7 @@ func (i *mergingIter) Timestamp() int64 { return i.curTs }
 // Value returns the current value.
 func (i *mergingIter) Value() []byte { return i.curValue }
 
-type iterHeap []*sst.Iter
+type iterHeap []Iter
 
 func (h iterHeap) Len() int { return len(h) }
 
@@ -85,7 +87,7 @@ func (h iterHeap) Less(i, j int) bool {
 		return it1.Key() < it2.Key()
 	}
 
-	return it1.Timestamp() < it2.Timestamp()
+	return it1.Timestamp() > it2.Timestamp()
 }
 
 func (h iterHeap) Swap(i, j int) {
@@ -93,7 +95,7 @@ func (h iterHeap) Swap(i, j int) {
 }
 
 func (h *iterHeap) Push(x interface{}) {
-	*h = append(*h, x.(*sst.Iter))
+	*h = append(*h, x.(Iter))
 }
 
 func (h *iterHeap) Pop() interface{} {

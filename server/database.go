@@ -347,7 +347,7 @@ func (d *database) compact(ssts []*sst.Reader) {
 		glog.Infof("SSTs being compacted are %v", names)
 	}
 
-	iters := make([]*sst.Iter, len(ssts))
+	iters := make([]Iter, len(ssts))
 	for i, sst := range ssts {
 		iter, err := sst.NewIter()
 		if err != nil {
