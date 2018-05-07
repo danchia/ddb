@@ -17,9 +17,11 @@ package server
 import (
 	"context"
 	"fmt"
+	"io/ioutil"
 	"math"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -99,6 +101,7 @@ func newDatabase(opts Options) *database {
 	db.logWriter = logWriter
 
 	go db.compactor()
+	go db.cleanUnusedFiles()
 
 	return db
 }
@@ -323,8 +326,57 @@ func (d *database) flushIMemtable() {
 	d.mu.Unlock()
 }
 
-//func (d *database) cleanUnusedFiles() {
-//}
+func (d *database) cleanUnusedFiles() {
+	ticker := time.NewTicker(30 * time.Second)
+	for range ticker.C {
+		liveSstFiles := make(map[string]bool)
+		d.mu.RLock()
+		for _, sst := range d.ssts {
+			liveSstFiles[sst.Filename()] = true
+		}
+		d.mu.RUnlock()
+		glog.V(4).Infof("Live SSTs are %v", liveSstFiles)
+
+		sstFiles, err := getSstDirFiles(d.opts.SstDir)
+		if err != nil {
+			glog.Warningf("error while scanning SST dir for cleanup: %v", err)
+			continue
+		}
+
+		var cleaned int
+		for _, fn := range sstFiles {
+			fullFn := filepath.Join(d.opts.SstDir, fn)
+			if !liveSstFiles[fullFn] {
+				glog.V(2).Infof("Deleting unused SST %v", fullFn)
+				if err := os.Remove(fullFn); err != nil {
+					glog.Warningf("Error while removing unused SST file %v: %v", fullFn, err)
+				} else {
+					cleaned++
+				}
+			}
+		}
+		if cleaned > 0 {
+			glog.Infof("Cleaned %v unused SST files", cleaned)
+		}
+	}
+}
+
+func getSstDirFiles(sstDir string) ([]string, error) {
+	fis, err := ioutil.ReadDir(sstDir)
+	if err != nil {
+		return nil, err
+	}
+
+	var ssts []string
+
+	for _, fi := range fis {
+		if strings.HasSuffix(fi.Name(), ".sst") {
+			ssts = append(ssts, fi.Name())
+		}
+	}
+
+	return ssts, nil
+}
 
 // compactor monitors the number of SSTs, and triggers compaction when necessary.
 // Currently the scheme is a very simple one - if there are more than 8 SSTs then compaction
