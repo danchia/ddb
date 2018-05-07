@@ -51,6 +51,8 @@ func TestMerge(t *testing.T) {
 		glog.V(4).Infof("got: %v", row)
 	}
 
+	merging.Close()
+
 	expected := []KTV{
 		{"abc", 0, []byte("1")},
 		{"abd", 0, []byte("1")},

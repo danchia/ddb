@@ -146,6 +146,7 @@ func TestFind(t *testing.T) {
 			if gotV, gotTs, err := r.Find(context.Background(), tt.findKey); err != tt.wantErr || gotTs != tt.wantTs || !cmp.Equal(gotV, tt.wantV) {
 				t.Errorf("Find(%v)=%#v,%v,%v want %#v,%v,%v", tt.findKey, gotV, gotTs, err, tt.wantV, tt.wantTs, tt.wantErr)
 			}
+			r.UnRef()
 		})
 	}
 }
@@ -184,6 +185,8 @@ func TestIter(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	r.UnRef() // iter should keep underlying reader alive.
+
 	cur := 0
 	for {
 		hasNext, err := iter.Next()
@@ -210,6 +213,8 @@ func TestIter(t *testing.T) {
 		}
 		cur++
 	}
+
+	iter.Close()
 
 	if cur != 1000 {
 		t.Errorf("Only read %d out of 1000 values.", cur)
@@ -266,6 +271,8 @@ func TestRandomData(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
+		r.UnRef()
+
 		for idx, key := range keys {
 			tsV := data[key]
 			hasNext, err := iter.Next()
@@ -281,6 +288,8 @@ func TestRandomData(t *testing.T) {
 			}
 
 		}
+
+		iter.Close()
 	}
 
 	{

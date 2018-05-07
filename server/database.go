@@ -222,8 +222,18 @@ func (d *database) maybeTriggerFlush() {
 func (d *database) Find(ctx context.Context, key string) ([]byte, error) {
 	// Acquire local copies of required structures, so that we can release lock quickly.
 	d.mu.RLock()
+
 	ssts := make([]*sst.Reader, len(d.ssts))
-	copy(ssts, d.ssts)
+	for i, sst := range d.ssts {
+		sst.Ref()
+		ssts[i] = sst
+	}
+	defer func() {
+		for _, sst := range ssts {
+			sst.UnRef()
+		}
+	}()
+
 	memtable := d.memtable
 	imemtable := d.imemtable
 	d.mu.RUnlock()
@@ -313,6 +323,9 @@ func (d *database) flushIMemtable() {
 	d.mu.Unlock()
 }
 
+//func (d *database) cleanUnusedFiles() {
+//}
+
 // compactor monitors the number of SSTs, and triggers compaction when necessary.
 // Currently the scheme is a very simple one - if there are more than 8 SSTs then compaction
 // of all the SSTs is triggered.
@@ -378,6 +391,8 @@ func (d *database) compact(ssts []*sst.Reader) {
 		writer.Append(mIter.Key(), mIter.Timestamp(), mIter.Value())
 	}
 
+	mIter.Close()
+
 	if err := writer.Close(); err != nil {
 		glog.Fatalf("Error closing writer while compacting: %v", err)
 	}
@@ -418,6 +433,7 @@ func (d *database) compact(ssts []*sst.Reader) {
 	var newSsts []*sst.Reader
 	for _, sst := range d.ssts {
 		if filenames[sst.Filename()] {
+			sst.UnRef()
 			continue
 		}
 		newSsts = append(newSsts, sst)

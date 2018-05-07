@@ -13,6 +13,9 @@ type Iter interface {
 
 	// Value returns the value of the current row.
 	Value() []byte
+
+	// Close closes the iterator.
+	Close()
 }
 
 type KTV struct {
@@ -50,4 +53,7 @@ func (i *memIter) Timestamp() int64 {
 
 func (i *memIter) Value() []byte {
 	return i.rows[i.index].Value
+}
+
+func (i *memIter) Close() {
 }

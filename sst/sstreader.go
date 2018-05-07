@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"hash/crc32"
 	"os"
+	"sync/atomic"
 
 	"github.com/golang/glog"
 )
@@ -37,8 +38,11 @@ type Reader struct {
 
 	cache   *Cache
 	cacheID uint64
+
+	refCount int32
 }
 
+// NewReader returns a new SST reader for filename, already ref-ed once.
 func NewReader(filename string, cache *Cache) (*Reader, error) {
 	f, err := os.Open(filename)
 	if err != nil {
@@ -55,6 +59,7 @@ func NewReader(filename string, cache *Cache) (*Reader, error) {
 		fLength:  fInfo.Size(),
 		filename: filename,
 		cache:    cache,
+		refCount: 1,
 	}
 	if err := r.readFooter(); err != nil {
 		return nil, fmt.Errorf("error while reading footer: %v", err)
@@ -63,6 +68,26 @@ func NewReader(filename string, cache *Cache) (*Reader, error) {
 		r.cacheID = cache.NewID()
 	}
 	return r, nil
+}
+
+// Ref increases the refcount by 1.
+func (r *Reader) Ref() {
+	atomic.AddInt32(&r.refCount, 1)
+}
+
+// UnRef decreases the refcount by 1.
+func (r *Reader) UnRef() {
+	newRef := atomic.AddInt32(&r.refCount, -1)
+	if newRef == 0 {
+		r.close()
+	}
+}
+
+func (r *Reader) close() {
+	glog.Infof("Closing SST reader for %v", r.filename)
+	if err := r.f.Close(); err != nil {
+		glog.Warningf("Error while closing SST reader: %v", err)
+	}
 }
 
 // Filename returns the full file path of the SST.
@@ -202,6 +227,7 @@ type Iter struct {
 }
 
 func newIter(r *Reader) (*Iter, error) {
+	r.Ref()
 	ibd, err := r.readRawBlock(r.indexBlockHandle, false)
 	if err != nil {
 		return nil, err
@@ -254,4 +280,8 @@ func (i *Iter) Value() []byte {
 
 func (i *Iter) Timestamp() int64 {
 	return i.dBlockIter.Timestamp()
+}
+
+func (i *Iter) Close() {
+	i.r.UnRef()
 }

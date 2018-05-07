@@ -25,14 +25,20 @@ type mergingIter struct {
 	curKey   string
 	curTs    int64
 	curValue []byte
+
+	iters []Iter
 }
 
 func newMergingIter(iters []Iter) (*mergingIter, error) {
-	mi := &mergingIter{h: new(iterHeap)}
+	mi := &mergingIter{
+		h:     new(iterHeap),
+		iters: iters,
+	}
 
 	for _, iter := range iters {
 		hasNext, err := iter.Next()
 		if err != nil {
+			mi.Close()
 			return nil, err
 		}
 		if hasNext {
@@ -74,6 +80,13 @@ func (i *mergingIter) Timestamp() int64 { return i.curTs }
 
 // Value returns the current value.
 func (i *mergingIter) Value() []byte { return i.curValue }
+
+// Close closes the iterator by closing all the underlying iters.
+func (i *mergingIter) Close() {
+	for _, it := range i.iters {
+		it.Close()
+	}
+}
 
 type iterHeap []Iter
 
