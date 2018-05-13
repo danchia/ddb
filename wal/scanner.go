@@ -20,12 +20,8 @@ import (
 	"hash"
 	"hash/crc32"
 	"io"
-	"io/ioutil"
 	"os"
 	"path/filepath"
-	"strings"
-
-	"github.com/golang/glog"
 
 	pb "github.com/danchia/ddb/proto"
 	"github.com/golang/protobuf/proto"
@@ -47,27 +43,9 @@ type Scanner struct {
 // NewScanner returns a log scanner over all the log files found in dirname.
 // Returns ErrNotExist if there are no log files.
 func NewScanner(dirname string) (*Scanner, error) {
-	fis, err := ioutil.ReadDir(dirname)
+	parsedNames, err := listLogFiles(dirname)
 	if err != nil {
 		return nil, err
-	}
-	parsedNames := make([]filenameInfo, 0, len(fis))
-	for _, fi := range fis {
-		name := fi.Name()
-		if !(strings.HasPrefix(name, "wal-") && strings.HasSuffix(name, ".log")) {
-			glog.Warningf("Skipping file %v in WAL directory, does not appear to be a WAL file.", name)
-			continue
-		}
-
-		pn, err := parseFilename(name)
-		if err != nil {
-			return nil, err
-		}
-		parsedNames = append(parsedNames, pn)
-	}
-
-	if len(parsedNames) == 0 {
-		return nil, os.ErrNotExist
 	}
 
 	return &Scanner{dirname: dirname, filenameInfos: parsedNames}, nil
@@ -129,23 +107,6 @@ func (s *Scanner) Err() error {
 		return s.curScanner.err
 	}
 	return nil
-}
-
-type filenameInfo struct {
-	name  string
-	seqNo int64
-}
-
-func parseFilename(n string) (filenameInfo, error) {
-	var seqNo int64
-	if _, err := fmt.Sscanf(n, "wal-%d.log", &seqNo); err != nil {
-		return filenameInfo{}, err
-	}
-
-	return filenameInfo{
-		name:  n,
-		seqNo: seqNo,
-	}, nil
 }
 
 // fileScanner reads log records from a write ahead log.

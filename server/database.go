@@ -329,6 +329,16 @@ func (d *database) flushIMemtable() {
 func (d *database) cleanUnusedFiles() {
 	ticker := time.NewTicker(30 * time.Second)
 	for range ticker.C {
+		var maxApplied int64
+		d.mu.RLock()
+		for _, sst := range d.descriptor.Current.GetSstMeta() {
+			if sst.AppliedUntil > maxApplied {
+				maxApplied = sst.AppliedUntil
+			}
+		}
+		d.mu.RUnlock()
+		wal.CleanUnusedFiles(d.opts.LogDir, maxApplied)
+
 		liveSstFiles := make(map[string]bool)
 		d.mu.RLock()
 		for _, sst := range d.ssts {
