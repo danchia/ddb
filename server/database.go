@@ -47,6 +47,9 @@ type database struct {
 	blockCache *sst.Cache
 	ssts       []*sst.Reader
 
+	// Full filenames of SSTs in the progress of being compacted.
+	compactingFiles []string
+
 	mu sync.RWMutex
 }
 
@@ -344,6 +347,9 @@ func (d *database) cleanUnusedFiles() {
 		for _, sst := range d.ssts {
 			liveSstFiles[sst.Filename()] = true
 		}
+		for _, f := range d.compactingFiles {
+			liveSstFiles[f] = true
+		}
 		d.mu.RUnlock()
 		glog.V(4).Infof("Live SSTs are %v", liveSstFiles)
 
@@ -413,6 +419,10 @@ func (d *database) compact(ssts []*sst.Reader) {
 	fn := fmt.Sprintf("%020d.sst", ts)
 	fullFn := filepath.Join(d.opts.SstDir, fn)
 
+	d.mu.Lock()
+	d.compactingFiles = append(d.compactingFiles, fullFn)
+	d.mu.Unlock()
+
 	glog.Infof("Compacting %v SSTs to %v", len(ssts), fullFn)
 	if glog.V(4) {
 		var names []string
@@ -459,6 +469,8 @@ func (d *database) compact(ssts []*sst.Reader) {
 		glog.Fatalf("Error closing writer while compacting: %v", err)
 	}
 
+	// TODO: is an fsync of some sort required here? Probably is.
+
 	glog.Infof("Compaction finished for %v", fullFn)
 
 	filenames := make(map[string]bool)
@@ -487,10 +499,18 @@ func (d *database) compact(ssts []*sst.Reader) {
 	newMetas = append(newMetas, newMeta)
 	d.descriptor.Current.SstMeta = newMetas
 	if err := d.descriptor.Save(); err != nil {
-		glog.Fatalf("error saving descriptor while flushing memtable: %v", err)
+		glog.Fatalf("error saving descriptor while compacting: %v", err)
 	}
 
 	glog.V(4).Infof("Descriptor after compaction is: %v", d.descriptor)
+
+	newCompactingFiles := d.compactingFiles[:0]
+	for _, f := range d.compactingFiles {
+		if f != fullFn {
+			newCompactingFiles = append(newCompactingFiles, f)
+		}
+	}
+	d.compactingFiles = newCompactingFiles
 
 	var newSsts []*sst.Reader
 	for _, sst := range d.ssts {
